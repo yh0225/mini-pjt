@@ -28,7 +28,7 @@ uv run python -m travel_agent.main [--thread <id>]    # CLI 실행 / 대화 이�
 Supervisor 패턴 멀티 에이전트. HITL은 `interrupt()`로 멈추고 `Command(resume=...)`로 재개한다.
 
 ```
-START → intake ──(필수 정보 부족 / 미지원 도시)→ [HITL①] ↺
+START → intake ──(필수 정보 부족)→ [HITL①] ↺   ──(미지원 도시)→ reject → END
           ↓
       Supervisor ◀────────────────────────────────────┐
        ├→ Researcher (ReAct + 도구)                    │
@@ -44,7 +44,8 @@ START → intake ──(필수 정보 부족 / 미지원 도시)→ [HITL①] �
 
 ### 노드
 - **intake**: LLM(`LIGHT_MODEL`)은 `IntakeExtraction` 추출만 한다. 병합(`merge_request`), 박/일 보정, 필수 필드 판단(`missing_fields`), 질문 문구(`build_question`)는 결정적 코드. 대화 전체를 매번 다시 읽어 최신 조건을 만든다
-- **ask_user** (HITL①): `interrupt({"type": "ask", "question"})` → 답을 메시지에 추가하고 intake로. 미지원 도시는 비슷한 지원 도시 + 전체 목록 안내
+- **ask_user** (HITL①): `interrupt({"type": "ask", "question"})` → 답을 메시지에 추가하고 intake로
+- **reject**: 미지원 도시면 (부족 정보가 있어도 먼저) `unsupported_message()`로 지원 도시 목록을 안내하고 END. CLI는 종료된 대화를 다시 열어도 같은 안내만 보여준다
 - **approve** (HITL②): `interrupt({"type": "approve_candidates", "candidates", "notice"})` → `approval.parse_reply()`가 `remove`/`add_requests`/`approve`로 해석. 뺀 후보는 `approved=False`로 남긴다
 - **Supervisor** (`LIGHT_MODEL`): structured output으로 `next`·`brief`(작업자에게 줄 영어 지시)·`reason`(사용자에게 보일 한국어 한 줄) 결정. `allowed_workers(state)`가 상태별 허용 작업자를 정하고 `enforce()`가 허용 밖 선택을 기본값으로 덮는다. 매 결정마다 `step_count += 1`. 20회 이후엔 재작업·검증을 건너뛰고 final_approval → save로 마무리
 - **Researcher**: `langchain.agents.create_agent` (ReAct) + `response_format=ToolStrategy(CandidateList)`. `summary_ko`·`reason_ko`는 항상 한국어. 결과는 `ground_candidates()`로 인덱스에서 재조회해 `source_url`·좌표를 채우고 인덱스에 없는 장소는 버린다
@@ -104,7 +105,7 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
     request: TripRequest
     missing: list[MissingField]          # destination / duration / theme / children_ages
-    unsupported_destination: str | None; similar_cities: list[str]
+    unsupported_destination: str | None   # 있으면 reject → END
     candidates: list[Candidate]
     add_requests: list[str]; notice: str | None; candidates_confirmed: bool   # HITL②
     next: Worker; brief: str; step_count: int; itinerary: Itinerary | None
@@ -195,5 +196,5 @@ tests/
 
 ## 주의 / 미결정
 - bge-m3는 약 2GB, 최초 1회 다운로드. Windows에서 한국어 출력 시 `PYTHONIOENCODING=utf-8` 필요할 수 있음
-- Researcher 후보는 프롬프트로 10곳, 추가 요청은 "요청 수만큼, 최대 3곳". 미지원 도시의 "일반 지식으로 진행"은 미구현 (FR-11 일부)
-- 미결정: 힐링 "주요 활동 사이 30분" 규칙이 같은 단지 안 연속 관람에도 적용돼 엄격함 (SERVICE.md 16절)
+- Researcher 후보는 프롬프트로 10곳, 추가 요청은 "요청 수만큼, 최대 3곳"
+- 힐링 "주요 활동 사이 30분" 규칙은 같은 단지 안 연속 관람에도 적용된다 (현행 유지 결정, SERVICE.md 16절)
