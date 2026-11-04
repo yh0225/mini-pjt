@@ -59,7 +59,6 @@ START → intake ──(필수 정보 부족)→ [HITL①] ↺   ──(미지�
 |---|---|
 | `search_places(query, city, theme)` | Chroma 검색. `city`로만 필터하고, `theme`은 태그가 있으면 순위를 올리는 신호로만 쓴다 (테마 필터를 걸면 Hit@5 90% → 85%) |
 | `estimate_travel_time(city, place_a, place_b, transport)` | 인덱스에서 두 장소 좌표 조회 → haversine × 보정계수(아래). 1km 이하는 도보, 좌표 없으면 30분 |
-| `search_blog(query)` | **보류** (네이버 키 없음). 추가 시 결과는 저장하지 않음 |
 
 ### 구현 상수
 | 항목 | 값 |
@@ -126,7 +125,6 @@ cities.yaml → crawler → data/raw/<lang>/*.wiki → chunk → data/raw/chunks
 - 태깅: 25개씩 묶어 structured output, 도시별 캐시로 새 청크만 태깅. 파싱 실패만 재시도하고 권한·접근 오류는 즉시 실패
 - 적재: 도시 단위로 기존 문서를 지우고 다시 넣는다 (재실행해도 결과 동일)
 - 단계별 실패는 건너뛰고 `data/logs/ingest.log`에 남긴다
-- 네이버 블로그 결과는 **적재하지 않는다** (실시간 도구 전용)
 
 ## 환경 변수 (`.env` → `config.py`)
 ```
@@ -134,8 +132,6 @@ LLM_PROVIDER=            # 선택: anthropic | bedrock (비우면 ANTHROPIC_API_
 ANTHROPIC_API_KEY=
 AWS_ACCESS_KEY_ID= / AWS_SECRET_ACCESS_KEY= / AWS_DEFAULT_REGION=
 BEDROCK_PROFILE_PREFIX=  # 선택: 1st-party ID에 붙일 접두어 (기본 us)
-NAVER_CLIENT_ID=
-NAVER_CLIENT_SECRET=
 AGENT_MODEL=             # 1st-party ID(claude-sonnet-5-5) 또는 Bedrock ID 그대로
 LIGHT_MODEL=
 ```
@@ -187,7 +183,7 @@ tests/
 
 ### 데이터·보안·Git
 - `.env`, `data/raw/`, `data/chroma/`, `data/checkpoints.db`, `output/`은 커밋하지 않는다
-- 키는 `.env.example`에 이름만 둔다. 네이버 API 결과는 디스크에 저장하지 않는다
+- 키는 `.env.example`에 이름만 둔다
 - 커밋 메시지는 Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`)
 
 ### 문서
