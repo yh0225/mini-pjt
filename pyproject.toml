@@ -1,0 +1,49 @@
+[project]
+name = "travel-agent"
+version = "0.1.0"
+description = "Theme-based travel itinerary multi-agent (LangGraph)"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain>=1.0",
+    "langchain-core>=1.0",
+    "langchain-anthropic>=1.0",
+    "langchain-text-splitters>=1.0",
+    "langchain-chroma>=1.0",
+    "langchain-huggingface>=1.0",
+    "langgraph>=1.0",
+    "chromadb>=1.0",
+    "sentence-transformers>=5.0",
+    "httpx>=0.28",
+    "mwparserfromhell>=0.7",
+    "pydantic>=2.10",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    "rich>=14.0",
+    "langchain-aws>=1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/travel_agent"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]  # sample wikitext fixtures have long lines
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

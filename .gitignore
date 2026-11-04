@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets
+.env
+
+# Data (generated)
+data/raw/
+data/chroma/
+data/checkpoints.db*
+data/logs/
+
+# Outputs
+itinerary.json
+itinerary.md

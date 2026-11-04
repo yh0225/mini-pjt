@@ -1,0 +1,101 @@
+# Supported cities for RAG ingestion.
+# - id: stable key used in metadata filters (city)
+# - name_ko: display name
+# - transport: default transport (car / taxi / transit), see SERVICE.md section 7
+# - wikivoyage_en: English Wikivoyage page titles (main page + districts with listings)
+# - wikivoyage_ko: Korean Wikivoyage page titles (mostly short stubs; optional)
+
+cities:
+  # --- Korea ---
+  - id: seoul
+    name_ko: 서울
+    transport: transit
+    wikivoyage_en: [Seoul, Seoul/Jongno, Seoul/Jung, Seoul/Gangnam-Seocho, Seoul/Seodaemun-Mapo]
+    wikivoyage_ko: [서울]
+  - id: jeju
+    name_ko: 제주
+    transport: car
+    wikivoyage_en: [Jeju, Jeju (city), Seogwipo]
+    wikivoyage_ko: [제주도]
+  - id: busan
+    name_ko: 부산
+    transport: transit
+    wikivoyage_en: [Busan, Busan/Haeundae, Busan/Central]
+    wikivoyage_ko: [부산광역시]
+  - id: gangneung
+    name_ko: 강릉
+    transport: car
+    wikivoyage_en: [Gangneung]
+    wikivoyage_ko: [강릉]
+  - id: gyeongju
+    name_ko: 경주
+    transport: car
+    wikivoyage_en: [Gyeongju]
+    wikivoyage_ko: []
+  - id: yeosu
+    name_ko: 여수
+    transport: car
+    wikivoyage_en: [Yeosu]
+    wikivoyage_ko: []
+  - id: jeonju
+    name_ko: 전주
+    transport: transit
+    wikivoyage_en: [Jeonju]
+    wikivoyage_ko: [전주]
+
+  # --- Overseas ---
+  - id: osaka
+    name_ko: 오사카
+    transport: transit
+    wikivoyage_en: [Osaka, Osaka/Kita, Osaka/Minami, Osaka/Bay Area, Osaka/Osaka castle]
+    wikivoyage_ko: []
+  - id: tokyo
+    name_ko: 도쿄
+    transport: transit
+    wikivoyage_en: [Tokyo, Tokyo/Asakusa, Tokyo/Shinjuku, Tokyo/Shibuya, Tokyo/Odaiba, Tokyo/Ueno]
+    wikivoyage_ko: [도쿄]
+  - id: fukuoka
+    name_ko: 후쿠오카
+    transport: transit
+    wikivoyage_en: [Fukuoka]
+    wikivoyage_ko: []
+  - id: okinawa
+    name_ko: 오키나와
+    transport: car
+    wikivoyage_en: [Naha, Northern Okinawa, Central Okinawa]
+    wikivoyage_ko: []
+  - id: danang
+    name_ko: 다낭
+    transport: taxi
+    wikivoyage_en: [Da Nang]
+    wikivoyage_ko: []
+  - id: nhatrang
+    name_ko: 나트랑
+    transport: taxi
+    wikivoyage_en: [Nha Trang]
+    wikivoyage_ko: []
+  - id: bangkok
+    name_ko: 방콕
+    transport: taxi
+    wikivoyage_en: [Bangkok, Bangkok/Rattanakosin, Bangkok/Siam Square, Bangkok/Sukhumvit]
+    wikivoyage_ko: []
+  - id: bali
+    name_ko: 발리
+    transport: car
+    wikivoyage_en: [Bali, Ubud, Seminyak, Nusa Dua, Sanur]
+    wikivoyage_ko: []
+  - id: guam
+    name_ko: 괌
+    transport: car
+    wikivoyage_en: [Guam, Tumon, Hagåtña]
+    wikivoyage_ko: []
+  - id: taipei
+    name_ko: 타이베이
+    transport: transit
+    wikivoyage_en: [Taipei, Taipei/Old Taipei, Taipei/Zhongshan, Taipei/Shilin]
+    wikivoyage_ko: []
+  - id: singapore
+    name_ko: 싱가포르
+    transport: transit
+    wikivoyage_en: [Singapore, Singapore/Marina Bay, Singapore/Sentosa and Harbourfront, Singapore/Chinatown, Singapore/North and West]
+    wikivoyage_ko: []
