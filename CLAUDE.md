@@ -5,18 +5,22 @@
 |---|---|
 | 언어 / 패키지 | Python 3.14 (`.venv`) / `uv` + `pyproject.toml` |
 | 에이전트 | LangChain + LangGraph |
-| LLM | `langchain-anthropic` — 에이전트: `claude-sonnet-5-5`, 태깅·intake: `claude-haiku-5-5` |
+| LLM | Claude — Anthropic API(`langchain-anthropic`) 또는 Amazon Bedrock(`langchain-aws`), `llm.py`가 선택 |
+| 모델 (현재) | Bedrock us-west-2: 에이전트 `us.anthropic.claude-sonnet-4-6`, 태깅·intake `us.anthropic.claude-haiku-4-5-20251001-v1:0` (5.5 계열은 계정 권한 없음, 권한이 생기면 `.env`만 변경) |
 | RAG | 로컬 HuggingFace `BAAI/bge-m3` + Chroma (`data/chroma/`) |
 | 체크포인터 | LangGraph `SqliteSaver` (`data/checkpoints.db`) |
 | 기타 | Pydantic v2, `rich`(CLI 출력), `ruff`, `pytest` |
 
-## 명령어 (예정)
+## 명령어
 ```bash
-uv sync                                   # 의존성 설치
-uv run python -m travel_agent.ingest      # 위키보이지 크롤링 → Chroma 적재
-uv run python -m travel_agent.main        # CLI 실행 (--thread <id>로 이어서 진행)
-uv run pytest                             # 테스트
+uv sync                                               # 의존성 설치
+uv run python -m travel_agent.ingest                  # 적재 전체 (crawl → chunk → tag → index)
+uv run python -m travel_agent.ingest --city jeju --steps crawl chunk   # 도시·단계 선택
+uv run python -m travel_agent.ingest.search "아이랑 갈 수족관" --city okinawa  # 검색 확인
+uv run python tests/eval_retrieval.py [--theme]       # 검색 품질 Hit@5
+uv run pytest                                         # 단위 테스트
 uv run ruff check . && uv run ruff format .
+uv run python -m travel_agent.main                    # (예정, M3) CLI 실행
 ```
 
 ## 아키텍처
@@ -47,7 +51,7 @@ START → intake ──(필수 정보 부족 / 미지원 도시)→ [HITL①] �
 ### Researcher 도구
 | 도구 | 동작 |
 |---|---|
-| `search_places(query, city, theme)` | Chroma 검색 (`city`, `themes` 메타데이터 필터) |
+| `search_places(query, city, theme)` | Chroma 검색. `city`로만 필터하고, `theme`은 태그가 있으면 순위를 올리는 신호로만 쓴다 (테마 필터를 걸면 Hit@5 90% → 85%) |
 | `search_blog(query)` | 네이버 블로그 검색 API. 결과는 저장하지 않음 |
 | `estimate_travel_time(place_a, place_b, transport)` | haversine 거리 × 이동 수단별 보정계수. 좌표 없으면 30분 |
 
@@ -98,45 +102,53 @@ class AgentState(TypedDict):
 
 ## RAG 적재 파이프라인 (`ingest/`)
 ```
-data/cities.yaml → crawler (위키보이지 ko/en) → data/raw/ → 정제 → 청크 분할
-→ tagger (LIGHT_MODEL) → bge-m3 임베딩 → Chroma
+cities.yaml → crawler → data/raw/<lang>/*.wiki → chunk → data/raw/chunks/<city>.jsonl
+→ tagger (LIGHT_MODEL) → data/raw/tags/<city>.json → index (bge-m3) → Chroma "places"
 ```
-- `cities.yaml`: 도시마다 `name`, `wikivoyage_ko`, `wikivoyage_en`, `transport` (`car`/`taxi`/`transit`)
-- 청크 메타데이터: `city`, `place`, `themes`, `lang`, `source`, `url`, `lat`, `lon`
-- 좌표는 위키보이지 listing 템플릿의 `lat`/`long`에서 추출, 없으면 `None`
-- 크롤러: `robots.txt` 확인, 요청 간 지연, 명시적 User-Agent, `data/raw/`에 캐시해 재요청하지 않음
-- 페이지 단위 실패는 건너뛰고 로그로 남긴 뒤 계속 진행
+- `cities.yaml`: 도시마다 `id`, `name_ko`, `transport` (`car`/`taxi`/`transit`), `wikivoyage_en`/`wikivoyage_ko` (문서 제목 목록, 큰 도시는 구 단위 문서 포함)
+- 수집: `/wiki/<title>?action=raw` (en은 `/w/api.php`가 robots.txt로 막힘). 넘겨주기 문서는 따라가고(ko의 `Wy/ko/` 접두어 제거), `robots.txt` 확인, 요청 간 1초, 명시적 User-Agent, 캐시가 있으면 재요청하지 않음 (`--refresh`로 강제)
+- 청크: listing 템플릿(`see`/`do`/`eat`/`drink`/`buy`, `sleep` 제외)은 장소 하나당 청크 하나, 설명 글은 800자·overlap 100. 장소는 도시 안에서 이름 기준으로 중복 제거 (좌표 있는 쪽 우선)
+- 메타데이터: `city`, `lang`, `source`, `url`, `page`, `section`, `kind`(`listing`/`prose`), `place`, `category`, `lat`, `lon`, `themes`(문자열) + `theme_family`/`theme_healing`(bool — Chroma는 리스트 메타데이터를 못 씀)
+- 태깅: 25개씩 묶어 structured output, 도시별 캐시로 새 청크만 태깅. 파싱 실패만 재시도하고 권한·접근 오류는 즉시 실패
+- 적재: 도시 단위로 기존 문서를 지우고 다시 넣는다 (재실행해도 결과 동일)
+- 단계별 실패는 건너뛰고 `data/logs/ingest.log`에 남긴다
 - 네이버 블로그 결과는 **적재하지 않는다** (실시간 도구 전용)
 
 ## 환경 변수 (`.env` → `config.py`)
 ```
+LLM_PROVIDER=            # 선택: anthropic | bedrock (비우면 ANTHROPIC_API_KEY → AWS 키 순으로 자동)
 ANTHROPIC_API_KEY=
+AWS_ACCESS_KEY_ID= / AWS_SECRET_ACCESS_KEY= / AWS_DEFAULT_REGION=
+BEDROCK_PROFILE_PREFIX=  # 선택: 1st-party ID에 붙일 접두어 (기본 us)
 NAVER_CLIENT_ID=
 NAVER_CLIENT_SECRET=
-AGENT_MODEL=claude-sonnet-5-5
-LIGHT_MODEL=claude-haiku-5-5
+AGENT_MODEL=             # 1st-party ID(claude-sonnet-5-5) 또는 Bedrock ID 그대로
+LIGHT_MODEL=
 ```
 
 ## 폴더 구조
 ```
 data/
 ├── cities.yaml
-├── raw/                     # 크롤링 원문 캐시
+├── raw/                     # 원문(en/, ko/), chunks/, tags/ 캐시
 ├── chroma/                  # 벡터 DB
+├── logs/
 └── checkpoints.db
 src/travel_agent/
-├── main.py                  # CLI 루프 (interrupt 처리, thread_id)
-├── graph.py                 # StateGraph 조립
-├── state.py                 # State, Pydantic 모델
-├── config.py                # 모델·경로·환경 변수
-├── agents/                  # supervisor, researcher, planners, critic
-├── tools/                   # search_places, search_blog, estimate_travel_time
-├── prompts/                 # 에이전트·테마별 프롬프트 파일
-├── rules.py                 # 테마 규칙 검사 (순수 함수)
-└── ingest/                  # crawler, chunk, tagger, index
+├── main.py                  # (M3) CLI 루프 (interrupt 처리, thread_id)
+├── graph.py                 # (M3) StateGraph 조립
+├── state.py                 # (M2~) State, Pydantic 모델
+├── config.py                # 경로·모델·환경 변수
+├── llm.py                   # Chat 모델 생성 (Anthropic / Bedrock)
+├── agents/                  # (M2~) supervisor, researcher, planners, critic
+├── tools/                   # (M2~) search_places, search_blog, estimate_travel_time
+├── prompts/                 # 프롬프트 파일 (tagger.md, ...)
+├── rules.py                 # (M5) 테마 규칙 검사 (순수 함수)
+└── ingest/                  # __main__, cities, crawler, chunk, tagger, index, search
 tests/
-├── test_rules.py            # 테마 규칙 단위 테스트 (LLM 호출 없음)
-└── eval_retrieval.py        # 질문↔정답 장소 약 20쌍, Chroma Hit@5
+├── test_chunk.py            # 위키텍스트 파서 단위 테스트
+├── test_rules.py            # (M5) 테마 규칙 단위 테스트
+└── eval_retrieval.py        # 한국어 질문↔정답 장소 20쌍, Hit@5 (pytest 대상 아님)
 ```
 
 ## 규약
@@ -145,6 +157,8 @@ tests/
 - 모든 함수에 타입 힌트, 데이터 구조는 Pydantic v2 모델
 - `ruff check`와 `ruff format`을 통과해야 한다
 - 모델 ID·경로·키는 하드코딩하지 않고 `config.py`를 통해 읽는다
+- Chat 모델은 직접 만들지 않고 `llm.get_chat_model("agent" | "light")`로만 만든다
+- `temperature` 등 샘플링 파라미터는 넣지 않는다 (최신 Claude 모델은 기본값이 아니면 400)
 - 프롬프트는 인라인으로 쓰지 않고 `prompts/` 파일로 분리한다
 - 새 테마는 `agents/` Planner + `prompts/` 프롬프트 + `rules.py` 규칙 추가로 확장한다
 - `rules.py`는 LLM을 호출하지 않는 **순수 함수**로, 규칙마다 pytest 단위 테스트를 둔다. 기준값은 SERVICE.md 8절
@@ -162,6 +176,7 @@ tests/
 - 제품 결정(무엇을·왜)은 SERVICE.md, 구현 결정(어떻게)은 CLAUDE.md에 둔다
 
 ## 주의 / 미결정
-- Python 3.14에서 torch·chromadb 설치 실패 시 3.12 가상환경으로 전환
-- bge-m3는 약 2GB, 최초 1회 다운로드 후 배치 적재
-- 미결정: 청크 크기·overlap, `estimate_travel_time` 보정계수
+- Python 3.14에서 torch 2.15·chromadb 1.5·sentence-transformers 6.2 동작 확인됨
+- bge-m3는 약 2GB, 최초 1회 다운로드 (이후 HF 캐시 사용)
+- Windows 터미널에서 한국어 출력 시 `PYTHONIOENCODING=utf-8` 필요할 수 있음
+- 미결정: `estimate_travel_time` 보정계수
