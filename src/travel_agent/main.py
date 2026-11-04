@@ -29,11 +29,15 @@ NODE_STATUS = {
     "research": "장소 조사",
     "family_planner": "가족 여행 일정 생성",
     "healing_planner": "힐링 여행 일정 생성",
+    "save": "파일 저장",
 }
 WORKER_KO = {
     "research": "장소 조사 (Researcher)",
     "family_planner": "가족 일정 플래너",
     "healing_planner": "힐링 일정 플래너",
+    "critic": "규칙 검증 (Critic)",
+    "final_approval": "최종 확인",
+    "save": "저장",
     "finish": "마무리",
 }
 
@@ -46,6 +50,19 @@ def run(graph, payload: Any, config: dict) -> None:
                 worker = WORKER_KO.get(chunk["next"], chunk["next"])
                 console.print(f"[magenta]🧑‍✈️ Supervisor → {worker}[/] [dim]{chunk['reason']}[/]")
                 status.update(f"[bold]{worker} 작업 중...[/]")
+            elif mode == "custom" and chunk.get("event") == "critic":
+                found = chunk["violations"]
+                if not found:
+                    console.print("[green]✓[/] 규칙 검증 통과")
+                else:
+                    redo = chunk["retry"] < chunk["max_retries"]
+                    action = "해당 날짜를 다시 만들어요" if redo else "⚠️ 경고로 표시해요"
+                    console.print(f"[yellow]✗ 규칙 위반 {len(found)}건 → {action}[/]")
+                    for message in found:
+                        console.print(f"  [dim]· {message}[/]")
+            elif mode == "custom" and chunk.get("event") == "revise":
+                days = ", ".join(map(str, chunk["days"]))
+                console.print(f"  [dim]✏️  {days}일차만 다시 만들어요[/]")
             elif mode == "custom" and chunk.get("event") == "tool_call":
                 args = chunk["args"]
                 detail = args.get("query") or f"{args.get('place_a')} ↔ {args.get('place_b')}"
@@ -77,7 +94,24 @@ def handle_interrupt(value: dict) -> str | None:
         console.print(candidates_table(shown, f"후보 장소 {len(shown)}곳"))
         console.print("이대로 진행할까요? 뺄 곳(예: 3번 빼줘)이나 추가할 곳을 말씀해 주세요.")
         return ask("›")
+    if value["type"] == "approve_itinerary":
+        show_itinerary(Itinerary(**value["itinerary"]))
+        console.print(
+            "\n이 일정으로 저장할까요? 바꾸고 싶은 부분이 있으면 말씀해 주세요. "
+            "(예: 2일차 오후는 실내로 바꿔줘)"
+        )
+        return ask("›")
     raise ValueError(f"Unknown interrupt type: {value['type']}")
+
+
+def show_itinerary(itinerary: Itinerary) -> None:
+    console.print(f"\n[bold green]✈️  {itinerary.title}[/]\n")
+    for table in itinerary_tables(itinerary):
+        console.print(table)
+    for tip in itinerary.tips:
+        console.print(f"💡 {tip}")
+    for warning in itinerary.warnings:
+        console.print(f"[yellow]⚠️ {warning}[/]")
 
 
 def print_result(values: dict) -> None:
@@ -87,15 +121,14 @@ def print_result(values: dict) -> None:
             "\n[bold yellow]일정을 만들지 못했어요.[/] 조건을 바꿔 새 대화를 시작해 주세요."
         )
         return
-    console.print(f"\n[bold green]✈️  {itinerary.title}[/]")
-    console.print(f"[dim]{describe_request_ko(values['request'])}[/]\n")
-    for table in itinerary_tables(itinerary):
-        console.print(table)
-    for tip in itinerary.tips:
-        console.print(f"💡 {tip}")
-    for warning in itinerary.warnings:
-        console.print(f"[yellow]⚠️ {warning}[/]")
-    console.print("[dim](규칙 검증·수정·파일 저장은 다음 단계(M5)에서 연결됩니다.)[/]")
+    if not values.get("saved_paths"):
+        show_itinerary(itinerary)
+        console.print("[yellow]일정이 저장되지 않았어요.[/]")
+        return
+    console.print(f"\n[bold green]✅ '{itinerary.title}' 일정을 저장했어요.[/]")
+    console.print(f"[dim]{describe_request_ko(values['request'])}[/]")
+    for path in values["saved_paths"]:
+        console.print(f"  📄 {path}")
 
 
 def main() -> None:

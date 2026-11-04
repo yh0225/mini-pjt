@@ -46,16 +46,56 @@ def test_planner_matches_theme_after_confirmation():
     assert allowed_workers({**base, "request": HEALING}) == ["healing_planner"]
 
 
-def test_finish_after_itinerary_or_when_nothing_to_plan_or_at_step_limit():
-    done = {"request": FAMILY, "candidates": [cand("A")], "candidates_confirmed": True}
-    assert allowed_workers({**done, "itinerary": itinerary(2)}) == ["finish"]
+def test_m5_sequence_critic_then_approval_then_save_then_finish():
+    s = {
+        "request": FAMILY,
+        "candidates": [cand("A")],
+        "candidates_confirmed": True,
+        "itinerary": itinerary(2),
+    }
+    assert allowed_workers(s) == ["critic"]
+    s["itinerary_checked"] = True
+    assert allowed_workers(s) == ["final_approval"]
+    s["final_approved"] = True
+    assert allowed_workers(s) == ["save"]
+    s["saved_paths"] = ["out.json"]
+    assert allowed_workers(s) == ["finish"]
+
+
+def test_pending_revise_days_go_back_to_the_theme_planner():
+    s = {
+        "request": HEALING,
+        "candidates": [cand("A")],
+        "candidates_confirmed": True,
+        "itinerary": itinerary(2),
+        "itinerary_checked": True,
+        "revise_days": [2],
+    }
+    assert allowed_workers(s) == ["healing_planner"]
+
+
+def test_finish_when_nothing_to_plan():
     empty = {
         "request": FAMILY,
         "candidates": [cand("A", approved=False)],
         "candidates_confirmed": True,
     }
     assert allowed_workers(empty) == ["finish"]
+
+
+def test_step_limit_skips_planning_and_checks_but_still_asks_and_saves():
     assert allowed_workers({"request": FAMILY, "step_count": MAX_STEPS}) == ["finish"]
+    s = {
+        "request": FAMILY,
+        "candidates": [cand("A")],
+        "candidates_confirmed": True,
+        "itinerary": itinerary(2),
+        "revise_days": [1],  # ignored at the limit
+        "step_count": MAX_STEPS,
+    }
+    assert allowed_workers(s) == ["final_approval"]
+    s["final_approved"] = True
+    assert allowed_workers(s) == ["save"]
 
 
 def test_enforce_overrides_illegal_choice_and_keeps_brief():

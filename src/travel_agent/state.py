@@ -76,7 +76,9 @@ class Itinerary(BaseModel):
     )
 
 
-Worker = Literal["research", "family_planner", "healing_planner", "finish"]
+Worker = Literal[
+    "research", "family_planner", "healing_planner", "critic", "final_approval", "save", "finish"
+]
 MissingField = Literal["destination", "duration", "theme", "children_ages"]
 
 
@@ -97,3 +99,11 @@ class AgentState(TypedDict, total=False):
     brief: str  # supervisor's instruction for the chosen worker
     step_count: int  # supervisor decisions so far
     itinerary: Itinerary | None
+    # --- M5: critic / HITL③ / save ---
+    revise_days: list[int]  # days the planner must rewrite next (critic or traveller)
+    revise_reason: str  # what must change on those days
+    retry_count: int  # critic-triggered rewrites in the current cycle (max 2)
+    itinerary_checked: bool  # critic has checked the current itinerary
+    critique: list[str]  # latest critic findings (Korean)
+    final_approved: bool
+    saved_paths: list[str]

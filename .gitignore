@@ -16,5 +16,6 @@ data/checkpoints.db*
 data/logs/
 
 # Outputs
+output/
 itinerary.json
 itinerary.md

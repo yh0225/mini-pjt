@@ -6,6 +6,7 @@ theme-rule prompt, so a new theme = one new prompt file + one graph node.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterator
 from typing import Any
@@ -85,16 +86,68 @@ def ground_itinerary(itinerary: Itinerary, candidates: list[Candidate], days: in
     return itinerary.model_copy(update={"days": days_out, "tips": tips, "warnings": warnings})
 
 
+def describe_revision(current: Itinerary, revise_days: list[int], reason: str) -> str:
+    plan = [
+        {
+            "day": d.day,
+            "summary": d.summary,
+            "activities": [
+                f"{a.start}-{a.end} [{a.category}] {a.title} @ {a.place}" for a in d.activities
+            ],
+        }
+        for d in current.days
+    ]
+    days = ", ".join(map(str, revise_days))
+    return (
+        "\n\n## Revision task\n"
+        f"An itinerary already exists. Rewrite ONLY day(s) {days}; the other days stay exactly "
+        "as they are (do not reuse their candidate places).\n"
+        f"What must change:\n{reason}\n\n"
+        "Current itinerary:\n" + json.dumps(plan, ensure_ascii=False, indent=1) + "\n\n"
+        "Return the full itinerary with all days (unchanged days copied as they are)."
+    )
+
+
+def merge_days(
+    current: Itinerary, revised: Itinerary, revise_days: list[int]
+) -> tuple[Itinerary, list[int]]:
+    """Take only `revise_days` from `revised`; every other day stays from `current`.
+
+    Returns the merged itinerary and the requested days the revised plan did not contain.
+    """
+    new_by_day = {d.day: d for d in revised.days}
+    days = []
+    missing = []
+    for day in current.days:
+        if day.day in revise_days and day.day in new_by_day:
+            days.append(new_by_day[day.day])
+        else:
+            if day.day in revise_days:
+                missing.append(day.day)
+            days.append(day)
+    return current.model_copy(update={"days": days}), missing
+
+
 def stream_plan(
     theme: str,
     request: TripRequest,
     city: City,
     candidates: list[Candidate],
     brief: str = "",
+    current: Itinerary | None = None,
+    revise_days: list[int] | None = None,
+    reason: str = "",
 ) -> Iterator[tuple[str, Any]]:
-    """Yield ("tool_call", call) events, then ("result", Itinerary | None)."""
+    """Yield ("tool_call", call) events, then ("result", Itinerary | None).
+
+    With `current` and `revise_days`, only those days are re-planned and merged back.
+    """
     agent = build_planner(theme)
-    inputs = {"messages": [("user", describe_task(request, city, candidates, brief))]}
+    task = describe_task(request, city, candidates, brief)
+    revising = current is not None and bool(revise_days)
+    if revising:
+        task += describe_revision(current, revise_days, reason)
+    inputs = {"messages": [("user", task)]}
     final: Itinerary | None = None
     try:
         for update in agent.stream(
@@ -111,4 +164,14 @@ def stream_plan(
                     final = node_output["structured_response"]
     except GraphRecursionError:
         log.warning("%s planner hit its step limit", theme)
-    yield "result", ground_itinerary(final, candidates, request.days or 0) if final else None
+    if final is None:
+        yield "result", current if revising else None
+        return
+    grounded = ground_itinerary(final, candidates, request.days or 0)
+    if revising:
+        merged, missing = merge_days(current, grounded, revise_days)
+        if missing:
+            log.warning("Revised plan lacked day(s) %s; kept the previous version", missing)
+        yield "result", merged
+    else:
+        yield "result", grounded
