@@ -49,9 +49,10 @@ START → intake ──(필수 정보 부족)→ [HITL①] ↺   ──(미지�
 - **approve** (HITL②): `interrupt({"type": "approve_candidates", "candidates", "notice"})` → `approval.parse_reply()`가 `remove`/`add_requests`/`approve`로 해석. 뺀 후보는 `approved=False`로 남긴다
 - **Supervisor** (`LIGHT_MODEL`): structured output으로 `next`·`brief`(작업자에게 줄 영어 지시)·`reason`(사용자에게 보일 한국어 한 줄) 결정. `allowed_workers(state)`가 상태별 허용 작업자를 정하고 `enforce()`가 허용 밖 선택을 기본값으로 덮는다. 매 결정마다 `step_count += 1`. 20회 이후엔 재작업·검증을 건너뛰고 final_approval → save로 마무리
 - **Researcher**: `langchain.agents.create_agent` (ReAct) + `response_format=ToolStrategy(CandidateList)`. `summary_ko`·`reason_ko`는 항상 한국어. 결과는 `ground_candidates()`로 인덱스에서 재조회해 `source_url`·좌표를 채우고 인덱스에 없는 장소는 버린다
-- **Family / Healing Planner**: 구현 하나(`agents/planner.py`)를 공유하고 프롬프트(`planner_base.md` + `planner_{theme}.md`)만 다르다. `create_agent` + `estimate_travel_time` + `ToolStrategy(Itinerary)`. 승인된 `Candidate`만 사용. `ground_itinerary()`가 `source_url`을 채운다. `revise_days`가 있으면 현재 일정 + 고칠 이유를 주고 다시 만든 뒤 `merge_days()`가 **그 날짜만** 반영한다
-- **Critic**: `rules.check_itinerary()`(권위) + `llm_review()`(미등록 장소·중복 방문·모순, 실패해도 무시). 위반이 있고 `retry_count < 2`면 위반 날짜를 `revise_days`로, 아니면 남은 위반을 `itinerary.warnings`로 덮어쓰고 `itinerary_checked=True`
-- **final_approval** (HITL③): `interrupt({"type": "approve_itinerary", "itinerary"})` → `parse_final_reply()` → 승인 / 고칠 날짜(`revise_days`, `retry_count` 0으로 초기화) / "전체 다시"는 모든 날짜
+- **Family / Healing Planner**: 구현 하나(`agents/planner.py`)를 공유하고 프롬프트(`planner_base.md` + `planner_{theme}.md`)만 다르다. `create_agent` + `estimate_travel_time` + `ToolStrategy(Itinerary)`. 승인된 `Candidate`만 사용. `ground_itinerary()`가 `source_url`을 채운다. `revise_days`가 있으면 현재 일정 + 고칠 이유를 주고 다시 만든 뒤 `merge_days()`가 **그 날짜만** 반영한다 (여행 팁은 새 결과로 교체, 제목은 유지)
+- **Critic**: `rules.check_itinerary()`(권위) + `llm_review()`(미등록 장소·중복 방문·모순, 실패해도 무시). 위반이 있고 `retry_count < 2`면 위반 날짜를 `revise_days`로(사유에 `traveller_request` 원문 포함), 아니면 남은 위반을 `itinerary.warnings`로 덮어쓰고 `itinerary_checked=True`
+  - 수정 요청 확인: **코드**(`activities_to_judge`)가 요청 날짜 + 시간대(`REQUEST_WINDOWS`: 오전·아침 <12, 점심 11–14, 오후 12–18, 저녁·밤 ≥18, 없으면 하루 전체)의 활동만 고르고(이동·식사 제외), LLM은 날짜별 `request_checks`(`satisfied`)만 답한다. `satisfied=False`만 `rule="request"` 위반
+- **final_approval** (HITL③): `interrupt({"type": "approve_itinerary", "itinerary"})` → `parse_final_reply()` → 승인(`traveller_request` 비움) / 고칠 날짜(`revise_days`·`traveller_request(_days)` 저장, `retry_count` 0) / "전체 다시"는 모든 날짜
 - **save**: `output.save_itinerary()` → `output/<thread_id>/itinerary.{json,md}` (사용한 장소의 출처 + CC BY-SA 문구)
 
 ### Researcher 도구
@@ -110,6 +111,7 @@ class AgentState(TypedDict, total=False):
     next: Worker; brief: str; step_count: int; itinerary: Itinerary | None
     revise_days: list[int]; revise_reason: str; retry_count: int           # 재작업
     itinerary_checked, final_approved: bool; critique: list[str]; saved_paths: list[str]
+    traveller_request: str; traveller_request_days: list[int]   # HITL③ 수정 요청 (Critic이 확인)
 ```
 (위는 필드 요약이다. 실제 코드에서는 필드마다 타입을 명시한다.)
 
