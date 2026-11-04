@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
+import threading
 from typing import Any
 
 from langchain_core.tools import tool
@@ -17,9 +17,18 @@ MAX_K = 10
 SNIPPET_CHARS = 300
 
 
-@lru_cache(maxsize=1)
+_store_lock = threading.Lock()
+_store_instance = None
+
+
 def _store():
-    return get_vectorstore()
+    """Open the vector store once. The agent runs tool calls in parallel threads, and
+    opening Chroma concurrently from two threads crashes, so initialization is locked."""
+    global _store_instance
+    with _store_lock:
+        if _store_instance is None:
+            _store_instance = get_vectorstore()
+        return _store_instance
 
 
 def rerank(results: list[tuple[Any, float]], theme: str | None, k: int) -> list[tuple[Any, float]]:

@@ -14,6 +14,7 @@ from typing import Any
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
 from langchain_core.messages import AIMessage, ToolMessage
+from langgraph.errors import GraphRecursionError
 from pydantic import BaseModel
 
 from travel_agent.config import PROMPTS_DIR
@@ -26,6 +27,7 @@ from travel_agent.tools.travel import estimate_travel_time
 log = logging.getLogger(__name__)
 
 RECURSION_LIMIT = 30  # ~14 tool round-trips
+ADD_RECURSION_LIMIT = 16  # "add more" requests: ~7 round-trips, then give up
 
 
 class CandidateList(BaseModel):
@@ -84,25 +86,47 @@ def ground_candidates(candidates: list[Candidate], city: str) -> list[Candidate]
     return grounded
 
 
-def stream_research(request: TripRequest, city: City) -> Iterator[tuple[str, Any]]:
+def describe_additions(add_requests: list[str], existing: list[Candidate]) -> str:
+    have = ", ".join(c.place for c in existing) or "(none)"
+    wants = "; ".join(add_requests)
+    return (
+        "\n\nThe traveller has reviewed the list and wants more places.\n"
+        f"Add for: {wants}\n"
+        f"Already in the list (do not repeat): {have}\n"
+        "Propose only NEW candidates that match these requests: as many as the traveller "
+        "asked for (one per request if no number was given, never more than 3 in total)."
+    )
+
+
+def stream_research(
+    request: TripRequest,
+    city: City,
+    extra_instruction: str = "",
+    recursion_limit: int = RECURSION_LIMIT,
+) -> Iterator[tuple[str, Any]]:
     """Run the agent, yielding ("tool_call" | "tool_result" | "result", payload) events."""
     agent = build_researcher()
-    inputs = {"messages": [("user", describe_request(request, city))]}
+    inputs = {"messages": [("user", describe_request(request, city) + extra_instruction)]}
     final: CandidateList | None = None
-    for update in agent.stream(
-        inputs, config={"recursion_limit": RECURSION_LIMIT}, stream_mode="updates"
-    ):
-        for node_output in update.values():
-            if not isinstance(node_output, dict):
-                continue
-            for msg in node_output.get("messages", []):
-                if isinstance(msg, AIMessage):
-                    for call in msg.tool_calls:
-                        yield "tool_call", call
-                elif isinstance(msg, ToolMessage):
-                    yield "tool_result", msg
-            if node_output.get("structured_response") is not None:
-                final = node_output["structured_response"]
+    try:
+        for update in agent.stream(
+            inputs, config={"recursion_limit": recursion_limit}, stream_mode="updates"
+        ):
+            for node_output in update.values():
+                if not isinstance(node_output, dict):
+                    continue
+                for msg in node_output.get("messages", []):
+                    if isinstance(msg, AIMessage):
+                        for call in msg.tool_calls:
+                            yield "tool_call", call
+                    elif isinstance(msg, ToolMessage):
+                        yield "tool_result", msg
+                if node_output.get("structured_response") is not None:
+                    final = node_output["structured_response"]
+    except GraphRecursionError:
+        # The agent kept searching (usually for something the index doesn't have).
+        log.warning("Researcher hit its step limit; returning no new candidates")
+        yield "warning", "step_limit"
     candidates = final.candidates if final else []
     yield "result", ground_candidates(candidates, city.id)
 

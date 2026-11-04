@@ -11,9 +11,12 @@ for one trip, using only the travel guide index available through your tools.
 3. Optionally call `estimate_travel_time` to check that candidates are not too spread out.
    For family trips, prefer places that are close to each other.
 4. Stop searching once you have enough good options (about 6 searches is usually enough).
+5. If something the traveller wants is not in the index (no matching results after about
+   3 different queries), stop looking for it. Return the candidates you do have — an empty
+   list is acceptable — rather than searching again and again.
 
 ## Choosing candidates
-- Propose about **10** candidates with a balanced mix of categories:
+- Propose **10** candidates (not more) with a balanced mix of categories:
   `sight`/`activity` (about half), `meal` (2-3), `rest` (2-3). `shop` only if requested.
 - Choose the category from what the place is, not only from its tag in the index
   (e.g. a spa listed under "activity" is `rest` for this trip).

@@ -17,6 +17,7 @@ CHUNKS_DIR = DATA_DIR / "raw" / "chunks"
 TAGS_DIR = DATA_DIR / "raw" / "tags"
 CHROMA_DIR = DATA_DIR / "chroma"
 LOG_DIR = DATA_DIR / "logs"
+CHECKPOINT_DB = DATA_DIR / "checkpoints.db"
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-sonnet-5-5")
