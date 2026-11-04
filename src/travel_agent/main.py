@@ -18,8 +18,8 @@ from rich.console import Console
 
 from travel_agent.config import CHECKPOINT_DB
 from travel_agent.graph import RECURSION_LIMIT, build_graph, make_checkpointer
-from travel_agent.state import Candidate
-from travel_agent.ui import candidates_table, describe_request_ko
+from travel_agent.state import Candidate, Itinerary
+from travel_agent.ui import candidates_table, describe_request_ko, itinerary_tables
 
 console = Console()
 QUIT_WORDS = {"q", "quit", "exit", "종료", "그만"}
@@ -27,6 +27,14 @@ QUIT_WORDS = {"q", "quit", "exit", "종료", "그만"}
 NODE_STATUS = {
     "intake": "여행 조건 정리",
     "research": "장소 조사",
+    "family_planner": "가족 여행 일정 생성",
+    "healing_planner": "힐링 여행 일정 생성",
+}
+WORKER_KO = {
+    "research": "장소 조사 (Researcher)",
+    "family_planner": "가족 일정 플래너",
+    "healing_planner": "힐링 일정 플래너",
+    "finish": "마무리",
 }
 
 
@@ -34,8 +42,11 @@ def run(graph, payload: Any, config: dict) -> None:
     """Stream one graph run, printing progress, until it finishes or hits an interrupt."""
     with console.status("[bold]생각 중...[/]") as status:
         for mode, chunk in graph.stream(payload, config, stream_mode=["updates", "custom"]):
-            if mode == "custom" and chunk.get("event") == "tool_call":
-                status.update("[bold]장소 조사 중...[/]")
+            if mode == "custom" and chunk.get("event") == "supervisor":
+                worker = WORKER_KO.get(chunk["next"], chunk["next"])
+                console.print(f"[magenta]🧑‍✈️ Supervisor → {worker}[/] [dim]{chunk['reason']}[/]")
+                status.update(f"[bold]{worker} 작업 중...[/]")
+            elif mode == "custom" and chunk.get("event") == "tool_call":
                 args = chunk["args"]
                 detail = args.get("query") or f"{args.get('place_a')} ↔ {args.get('place_b')}"
                 console.print(f"  [dim]🔎 {chunk['name']}: {detail}[/]")
@@ -70,10 +81,21 @@ def handle_interrupt(value: dict) -> str | None:
 
 
 def print_result(values: dict) -> None:
-    approved = [c for c in values.get("candidates", []) if c.approved]
-    console.print(f"\n[bold green]후보 장소 {len(approved)}곳이 확정됐어요.[/]")
-    console.print(candidates_table(approved, describe_request_ko(values["request"])))
-    console.print("[dim](일정 생성은 다음 단계(M4)에서 연결됩니다.)[/]")
+    itinerary: Itinerary | None = values.get("itinerary")
+    if itinerary is None:
+        console.print(
+            "\n[bold yellow]일정을 만들지 못했어요.[/] 조건을 바꿔 새 대화를 시작해 주세요."
+        )
+        return
+    console.print(f"\n[bold green]✈️  {itinerary.title}[/]")
+    console.print(f"[dim]{describe_request_ko(values['request'])}[/]\n")
+    for table in itinerary_tables(itinerary):
+        console.print(table)
+    for tip in itinerary.tips:
+        console.print(f"💡 {tip}")
+    for warning in itinerary.warnings:
+        console.print(f"[yellow]⚠️ {warning}[/]")
+    console.print("[dim](규칙 검증·수정·파일 저장은 다음 단계(M5)에서 연결됩니다.)[/]")
 
 
 def main() -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from rich.table import Table
 
 from travel_agent.ingest.cities import load_cities
-from travel_agent.state import Candidate, TripRequest
+from travel_agent.state import Candidate, Itinerary, TripRequest
 
 CATEGORY_KO = {"sight": "관광", "activity": "체험", "meal": "식사", "rest": "휴식", "shop": "쇼핑"}
 THEME_KO = {"family": "가족", "healing": "힐링"}
@@ -43,3 +43,24 @@ def describe_request_ko(request: TripRequest) -> str:
     if request.preferences:
         parts.append("선호: " + ", ".join(request.preferences))
     return " · ".join(parts)
+
+
+CATEGORY_ICON = {"sight": "🏛", "activity": "🎈", "meal": "🍽", "rest": "☕", "move": "🚗"}
+
+
+def itinerary_tables(itinerary: Itinerary) -> list[Table]:
+    tables = []
+    for day in itinerary.days:
+        table = Table(title=f"{day.day}일차 — {day.summary}", title_justify="left")
+        for col in ["시간", "", "일정", "장소", "메모"]:
+            table.add_column(col, overflow="fold")
+        for a in day.activities:
+            table.add_row(
+                f"{a.start}-{a.end}",
+                CATEGORY_ICON.get(a.category, ""),
+                a.title,
+                a.place,
+                a.note or "",
+            )
+        tables.append(table)
+    return tables
