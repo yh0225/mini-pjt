@@ -40,15 +40,15 @@ START → intake ──(필수 정보 부족 / 미지원 도시)→ [HITL①] �
                 ├─ 수정 요청 → Supervisor (revise_days만 재생성)
                 └─ 승인 → save → END
 ```
-현재 구현(M3): `intake →(missing/미지원)→ ask_user → intake`, `intake → research → approve →(추가 요청)→ research`, `approve →(애매한 답)→ approve`, `approve →(확정)→ END` (M4에서 END 대신 Supervisor)
+현재 구현(M4): `intake →(missing/미지원)→ ask_user → intake`, `intake → supervisor`, `supervisor → research | family_planner | healing_planner | END(finish)`, `research → approve →(확정)→ supervisor | (추가 요청)→ research | (애매한 답)→ approve`, `planner → supervisor` (M5: critic, HITL③, save 추가)
 
 ### 노드
 - **intake**: LLM(`LIGHT_MODEL`)은 `IntakeExtraction` 추출만 한다. 병합(`merge_request`), 박/일 보정, 필수 필드 판단(`missing_fields`), 질문 문구(`build_question`)는 결정적 코드. 대화 전체를 매번 다시 읽어 최신 조건을 만든다
 - **ask_user** (HITL①): `interrupt({"type": "ask", "question"})` → 답을 메시지에 추가하고 intake로. 미지원 도시는 비슷한 지원 도시 + 전체 목록 안내
 - **approve** (HITL②): `interrupt({"type": "approve_candidates", "candidates", "notice"})` → `approval.parse_reply()`가 `remove`/`add_requests`/`approve`로 해석. 뺀 후보는 `approved=False`로 남긴다
-- **Supervisor**: structured output으로 `next` 결정. 매 결정마다 `step_count += 1`
+- **Supervisor** (`LIGHT_MODEL`): structured output으로 `next`·`brief`(작업자에게 줄 영어 지시)·`reason`(사용자에게 보일 한국어 한 줄) 결정. `allowed_workers(state)`가 상태별 허용 작업자를 정하고 `enforce()`가 허용 밖 선택을 기본값으로 덮는다. 매 결정마다 `step_count += 1`, 10회면 finish
 - **Researcher**: `langchain.agents.create_agent` (ReAct) + `response_format=ToolStrategy(CandidateList)`. `summary_ko`·`reason_ko`는 항상 한국어. 결과는 `ground_candidates()`로 인덱스에서 재조회해 `source_url`·좌표를 채우고 인덱스에 없는 장소는 버린다
-- **Family / Healing Planner**: 승인된 `Candidate`만 사용해 `Itinerary` 생성. `revise_days`가 있으면 해당 날만 재생성
+- **Family / Healing Planner**: 구현 하나(`agents/planner.py`)를 공유하고 프롬프트(`planner_base.md` + `planner_{theme}.md`)만 다르다. `create_agent` + `estimate_travel_time` + `ToolStrategy(Itinerary)`. 승인된 `Candidate`만 사용. `ground_itinerary()`가 `source_url`을 채우고 일수 불일치를 `warnings`에 기록 (M5: `revise_days`만 재생성)
 - **Critic**: `rules.py` 검사 결과 + LLM 검토를 `critique`에 기록
 - **save**: rich 표 출력, `itinerary.json` / `itinerary.md` 저장 (출처 목록 + CC BY-SA 문구)
 
@@ -71,6 +71,7 @@ START → intake ──(필수 정보 부족 / 미지원 도시)→ [HITL①] �
 | 테마 순위 보정 (`THEME_BOOST`) | 태그된 장소의 cosine 거리 −0.05, 3배수로 가져와 재정렬 |
 | 이동 시간 (우회 계수 / 속도 / 추가 시간) | car 1.3·40km/h·+5분, taxi 1.3·25km/h·+5분, transit 1.4·22km/h·+10분, 도보 1.2·4.5km/h (초기값) |
 | Researcher `recursion_limit` | 기본 30, 추가 요청 16. 초과 시 `GraphRecursionError`를 잡아 빈 결과 + 안내 문구 |
+| Planner `recursion_limit` | 40 (이동 시간 확인 5~8회 권장) |
 
 ## 데이터 모델 (`state.py`)
 ```python
@@ -95,6 +96,7 @@ class Activity(BaseModel):
 
 class DayPlan(BaseModel):     day: int; summary: str; activities: list[Activity]
 class Itinerary(BaseModel):   title, theme; days: list[DayPlan]; tips, warnings: list[str]
+# warnings는 시스템 점검 전용. LLM이 쓴 warnings는 ground_itinerary()가 tips로 옮긴다
 
 class AgentState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
@@ -103,12 +105,8 @@ class AgentState(TypedDict, total=False):
     unsupported_destination: str | None; similar_cities: list[str]
     candidates: list[Candidate]
     add_requests: list[str]; notice: str | None; candidates_confirmed: bool   # HITL②
-    # --- M4~ ---
-    itinerary: Itinerary | None
-    critique: list[str]
-    retry_count, step_count: int
-    revise_days: list[int]
-    next: str
+    next: Worker; brief: str; step_count: int; itinerary: Itinerary | None   # M4
+    critique: list[str]; retry_count: int; revise_days: list[int]          # M5 예정
 ```
 (위는 필드 요약이다. 실제 코드에서는 필드마다 타입을 명시한다.)
 
@@ -149,19 +147,20 @@ data/
 src/travel_agent/
 ├── main.py                  # CLI 루프 (interrupt 처리, thread_id, 중단 지점 재개)
 ├── graph.py                 # StateGraph 조립, make_checkpointer()
-├── state.py                 # TripRequest, Candidate, AgentState
+├── state.py                 # TripRequest, Candidate, Activity/DayPlan/Itinerary, AgentState
 ├── config.py                # 경로·모델·환경 변수
 ├── llm.py                   # Chat 모델 생성 (Anthropic / Bedrock)
 ├── ui.py                    # rich 표·요약 문구
-├── agents/                  # intake, approval, researcher (M4~ supervisor, planners, critic)
+├── agents/                  # intake, approval, researcher, supervisor, planner (M5 critic)
 ├── tools/                   # places.py (search_places), travel.py (estimate_travel_time)
-├── prompts/                 # tagger, researcher, intake, approval (.md)
+├── prompts/                 # tagger, researcher, intake, approval, supervisor, planner_* (.md)
 ├── rules.py                 # (M5) 테마 규칙 검사 (순수 함수)
 └── ingest/                  # __main__, cities, crawler, chunk, tagger, index, search
 tests/
 ├── test_chunk.py            # 위키텍스트 파서 단위 테스트
 ├── test_tools.py            # 순위 보정·이동 시간 단위 테스트
 ├── test_intake.py           # intake 병합·필수 필드·질문, 후보 제거 단위 테스트
+├── test_supervisor.py       # 라우팅 허용 범위, 일정 grounding 단위 테스트
 ├── test_rules.py            # (M5) 테마 규칙 단위 테스트
 └── eval_retrieval.py        # 한국어 질문↔정답 장소 20쌍, Hit@5 (pytest 대상 아님)
 ```
@@ -175,7 +174,7 @@ tests/
 - Chat 모델은 직접 만들지 않고 `llm.get_chat_model("agent" | "light")`로만 만든다
 - `temperature` 등 샘플링 파라미터는 넣지 않는다 (최신 Claude 모델은 기본값이 아니면 400)
 - 프롬프트는 인라인으로 쓰지 않고 `prompts/` 파일로 분리한다
-- 새 테마는 `agents/` Planner + `prompts/` 프롬프트 + `rules.py` 규칙 추가로 확장한다
+- 새 테마는 `prompts/planner_{theme}.md` + 그래프 노드(`make_planner_node`) + `rules.py` 규칙 추가로 확장한다
 - `rules.py`는 LLM을 호출하지 않는 **순수 함수**로, 규칙마다 pytest 단위 테스트를 둔다. 기준값은 SERVICE.md 8절
 - LLM은 추출·생성만 맡기고, 판단(필수 필드, 라우팅, 후보 제거)은 결정적 코드로 한다
 - 상태에 새 Pydantic 모델을 넣으면 `graph.CHECKPOINT_TYPES`에 등록한다 (미등록 타입은 체크포인트 복원 시 차단 예정)
