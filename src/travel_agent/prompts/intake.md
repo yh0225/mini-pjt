@@ -7,8 +7,6 @@ Fields:
 - `destination_name`: the destination as the traveller said it (e.g. "제주도", "오사카").
 - `city_id`: the matching id from the supported city list below, or null if the
   destination is not in the list (or no destination was given).
-- `similar_city_ids`: only when the destination is NOT supported: up to 3 supported
-  city ids that would make a similar trip (same country/region or similar feel).
 - `nights`, `days`: "3박 4일" -> nights=3, days=4. "당일치기" -> nights=0, days=1.
   "2박" -> nights=2 only. "주말" alone is not enough; leave null.
 - `theme`: "family" if travelling with children / for kids ("아이랑", "애들 데리고",

@@ -20,7 +20,6 @@ from travel_agent.state import MissingField, Theme, Transport, TripRequest
 class IntakeExtraction(BaseModel):
     destination_name: str | None = None
     city_id: str | None = None
-    similar_city_ids: list[str] = Field(default_factory=list)
     nights: int | None = None
     days: int | None = None
     theme: Theme | None = None
@@ -107,20 +106,15 @@ QUESTIONS: dict[str, str] = {
 }
 
 
-def build_question(
-    missing: list[MissingField],
-    unsupported: str | None = None,
-    similar: list[str] | None = None,
-) -> str:
-    cities = cities_by_id()
-    if unsupported:
-        names = [cities[c].name_ko for c in (similar or []) if c in cities]
-        all_names = ", ".join(c.name_ko for c in cities.values())
-        lines = [f"'{unsupported}'은(는) 아직 여행 자료가 없는 도시예요."]
-        if names:
-            lines.append(f"비슷한 여행지로 {', '.join(names)}은(는) 어떠세요?")
-        lines.append(f"지원 도시: {all_names}")
-        lines.append("가고 싶은 도시를 다시 알려 주세요.")
-        others = [QUESTIONS[m] for m in missing if m != "destination"]
-        return "\n".join(lines + others)
+def build_question(missing: list[MissingField]) -> str:
     return "\n".join(QUESTIONS[m] for m in missing)
+
+
+def unsupported_message(destination: str) -> str:
+    """Closing message when the traveller names a city we have no data for."""
+    all_names = ", ".join(c.name_ko for c in cities_by_id().values())
+    return (
+        f"'{destination}'은(는) 아직 여행 자료가 없는 도시라 여기서 대화를 마칠게요.\n"
+        f"지원 도시: {all_names}\n"
+        "지원 도시로 새 대화를 시작해 주세요."
+    )

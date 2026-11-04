@@ -89,7 +89,6 @@ class AgentState(TypedDict, total=False):
     request: TripRequest
     missing: list[MissingField]  # required fields still unknown (HITL①)
     unsupported_destination: str | None  # destination the user named but we have no data for
-    similar_cities: list[str]  # supported city ids suggested instead
     candidates: list[Candidate]
     add_requests: list[str]  # extra places the user asked for at HITL②
     notice: str | None  # latest research result message shown at HITL②

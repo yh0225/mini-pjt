@@ -1,12 +1,15 @@
 from travel_agent.agents.approval import apply_removals
 from travel_agent.agents.intake import (
+    QUESTIONS,
     IntakeExtraction,
     build_question,
     merge_request,
     missing_fields,
     normalize_duration,
     unsupported_destination,
+    unsupported_message,
 )
+from travel_agent.graph import route_after_intake
 from travel_agent.state import Candidate, TripRequest
 
 
@@ -49,10 +52,22 @@ def test_missing_fields_requires_child_ages_only_for_family():
     assert missing_fields(healing) == []
 
 
-def test_build_question_mentions_unsupported_city_and_similar_options():
-    q = build_question(["destination", "theme"], unsupported="파리", similar=["osaka", "nope"])
-    assert "파리" in q and "오사카" in q and "가족 여행" in q
-    assert "어디로" not in q  # destination question replaced by the unsupported-city message
+def test_build_question_asks_one_line_per_missing_field():
+    q = build_question(["destination", "theme"])
+    assert q.splitlines() == [QUESTIONS["destination"], QUESTIONS["theme"]]
+
+
+def test_unsupported_message_names_the_city_and_lists_supported_ones():
+    msg = unsupported_message("파리")
+    assert "파리" in msg and "마칠게요" in msg
+    assert "제주" in msg and "싱가포르" in msg
+
+
+def test_unsupported_city_ends_the_conversation_before_asking_anything():
+    state = {"unsupported_destination": "파리", "missing": ["duration", "theme"]}
+    assert route_after_intake(state) == "reject"
+    assert route_after_intake({"missing": ["theme"]}) == "ask_user"
+    assert route_after_intake({"missing": []}) == "supervisor"
 
 
 def _cand(name: str, approved: bool = True) -> Candidate:

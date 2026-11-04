@@ -16,6 +16,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from rich.console import Console
 
+from travel_agent.agents.intake import unsupported_message
 from travel_agent.config import CHECKPOINT_DB
 from travel_agent.graph import RECURSION_LIMIT, build_graph, make_checkpointer
 from travel_agent.state import Candidate, Itinerary
@@ -115,6 +116,11 @@ def show_itinerary(itinerary: Itinerary) -> None:
 
 
 def print_result(values: dict) -> None:
+    if values.get("unsupported_destination"):
+        console.print(
+            f"\n[bold yellow]🚫 {unsupported_message(values['unsupported_destination'])}[/]"
+        )
+        return
     itinerary: Itinerary | None = values.get("itinerary")
     if itinerary is None:
         console.print(

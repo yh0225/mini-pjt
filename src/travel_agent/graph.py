@@ -1,6 +1,7 @@
 """LangGraph assembly.
 
-START → intake ─(missing / unsupported city)→ ask_user ─→ intake
+START → intake ─(missing)→ ask_user ─→ intake
+               ├(unsupported city)→ reject → END
                └→ supervisor ─→ research → approve ─(add more)→ research
                      ▲    │                       ├(unclear reply)→ approve
                      │    │                       └(confirmed)→ supervisor
@@ -37,6 +38,7 @@ from travel_agent.agents.intake import (
     merge_request,
     missing_fields,
     unsupported_destination,
+    unsupported_message,
 )
 from travel_agent.agents.planner import stream_plan
 from travel_agent.agents.researcher import ADD_RECURSION_LIMIT, describe_additions, stream_research
@@ -65,24 +67,27 @@ def intake_node(state: AgentState) -> dict:
         "request": request,
         "missing": missing_fields(request),
         "unsupported_destination": unsupported,
-        "similar_cities": ext.similar_city_ids if unsupported else [],
     }
 
 
 def route_after_intake(state: AgentState) -> str:
-    if state.get("missing") or state.get("unsupported_destination"):
+    # An unsupported city ends the conversation, even if other fields are missing.
+    if state.get("unsupported_destination"):
+        return "reject"
+    if state.get("missing"):
         return "ask_user"
     return "supervisor"
 
 
 def ask_user_node(state: AgentState) -> dict:
-    question = build_question(
-        state.get("missing", []),
-        state.get("unsupported_destination"),
-        state.get("similar_cities"),
-    )
+    question = build_question(state.get("missing", []))
     answer = interrupt({"type": "ask", "question": question})
     return {"messages": [AIMessage(question), HumanMessage(str(answer))]}
+
+
+def reject_node(state: AgentState) -> dict:
+    """Unsupported destination: explain and stop (no planning without source data)."""
+    return {"messages": [AIMessage(unsupported_message(state["unsupported_destination"]))]}
 
 
 # --- research ------------------------------------------------------------------------
@@ -294,6 +299,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     g = StateGraph(AgentState)
     g.add_node("intake", intake_node)
     g.add_node("ask_user", ask_user_node)
+    g.add_node("reject", reject_node)
     g.add_node("research", research_node)
     g.add_node("approve", approve_node)
     g.add_node("supervisor", supervisor_node)
@@ -304,7 +310,8 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     g.add_node("save", save_node)
 
     g.add_edge(START, "intake")
-    g.add_conditional_edges("intake", route_after_intake, ["ask_user", "supervisor"])
+    g.add_conditional_edges("intake", route_after_intake, ["ask_user", "reject", "supervisor"])
+    g.add_edge("reject", END)
     g.add_edge("ask_user", "intake")
     g.add_conditional_edges(
         "supervisor",
