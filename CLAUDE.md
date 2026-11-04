@@ -40,17 +40,18 @@ START → intake ──(필수 정보 부족 / 미지원 도시)→ [HITL①] �
                 ├─ 수정 요청 → Supervisor (revise_days만 재생성)
                 └─ 승인 → save → END
 ```
-현재 구현(M4): `intake →(missing/미지원)→ ask_user → intake`, `intake → supervisor`, `supervisor → research | family_planner | healing_planner | END(finish)`, `research → approve →(확정)→ supervisor | (추가 요청)→ research | (애매한 답)→ approve`, `planner → supervisor` (M5: critic, HITL③, save 추가)
+구현 완료(M5). 모든 작업자는 끝나면 supervisor로 돌아간다. 허용 순서(`allowed_workers`): research → (approve) → planner → critic → (`revise_days` 있으면 planner) → final_approval → save → finish. `approve`는 추가 요청이면 research, 애매하면 다시 approve
 
 ### 노드
 - **intake**: LLM(`LIGHT_MODEL`)은 `IntakeExtraction` 추출만 한다. 병합(`merge_request`), 박/일 보정, 필수 필드 판단(`missing_fields`), 질문 문구(`build_question`)는 결정적 코드. 대화 전체를 매번 다시 읽어 최신 조건을 만든다
 - **ask_user** (HITL①): `interrupt({"type": "ask", "question"})` → 답을 메시지에 추가하고 intake로. 미지원 도시는 비슷한 지원 도시 + 전체 목록 안내
 - **approve** (HITL②): `interrupt({"type": "approve_candidates", "candidates", "notice"})` → `approval.parse_reply()`가 `remove`/`add_requests`/`approve`로 해석. 뺀 후보는 `approved=False`로 남긴다
-- **Supervisor** (`LIGHT_MODEL`): structured output으로 `next`·`brief`(작업자에게 줄 영어 지시)·`reason`(사용자에게 보일 한국어 한 줄) 결정. `allowed_workers(state)`가 상태별 허용 작업자를 정하고 `enforce()`가 허용 밖 선택을 기본값으로 덮는다. 매 결정마다 `step_count += 1`, 10회면 finish
+- **Supervisor** (`LIGHT_MODEL`): structured output으로 `next`·`brief`(작업자에게 줄 영어 지시)·`reason`(사용자에게 보일 한국어 한 줄) 결정. `allowed_workers(state)`가 상태별 허용 작업자를 정하고 `enforce()`가 허용 밖 선택을 기본값으로 덮는다. 매 결정마다 `step_count += 1`. 20회 이후엔 재작업·검증을 건너뛰고 final_approval → save로 마무리
 - **Researcher**: `langchain.agents.create_agent` (ReAct) + `response_format=ToolStrategy(CandidateList)`. `summary_ko`·`reason_ko`는 항상 한국어. 결과는 `ground_candidates()`로 인덱스에서 재조회해 `source_url`·좌표를 채우고 인덱스에 없는 장소는 버린다
-- **Family / Healing Planner**: 구현 하나(`agents/planner.py`)를 공유하고 프롬프트(`planner_base.md` + `planner_{theme}.md`)만 다르다. `create_agent` + `estimate_travel_time` + `ToolStrategy(Itinerary)`. 승인된 `Candidate`만 사용. `ground_itinerary()`가 `source_url`을 채우고 일수 불일치를 `warnings`에 기록 (M5: `revise_days`만 재생성)
-- **Critic**: `rules.py` 검사 결과 + LLM 검토를 `critique`에 기록
-- **save**: rich 표 출력, `itinerary.json` / `itinerary.md` 저장 (출처 목록 + CC BY-SA 문구)
+- **Family / Healing Planner**: 구현 하나(`agents/planner.py`)를 공유하고 프롬프트(`planner_base.md` + `planner_{theme}.md`)만 다르다. `create_agent` + `estimate_travel_time` + `ToolStrategy(Itinerary)`. 승인된 `Candidate`만 사용. `ground_itinerary()`가 `source_url`을 채운다. `revise_days`가 있으면 현재 일정 + 고칠 이유를 주고 다시 만든 뒤 `merge_days()`가 **그 날짜만** 반영한다
+- **Critic**: `rules.check_itinerary()`(권위) + `llm_review()`(미등록 장소·중복 방문·모순, 실패해도 무시). 위반이 있고 `retry_count < 2`면 위반 날짜를 `revise_days`로, 아니면 남은 위반을 `itinerary.warnings`로 덮어쓰고 `itinerary_checked=True`
+- **final_approval** (HITL③): `interrupt({"type": "approve_itinerary", "itinerary"})` → `parse_final_reply()` → 승인 / 고칠 날짜(`revise_days`, `retry_count` 0으로 초기화) / "전체 다시"는 모든 날짜
+- **save**: `output.save_itinerary()` → `output/<thread_id>/itinerary.{json,md}` (사용한 장소의 출처 + CC BY-SA 문구)
 
 ### Researcher 도구
 | 도구 | 동작 |
@@ -63,7 +64,8 @@ START → intake ──(필수 정보 부족 / 미지원 도시)→ [HITL①] �
 | 항목 | 값 |
 |---|---|
 | Critic 재작업 상한 (`retry_count`) | 2 → 초과 시 `warnings`에 기록하고 HITL③ |
-| Supervisor 결정 상한 (`step_count`) | 10 → 초과 시 현재 결과로 HITL③ |
+| Supervisor 결정 상한 (`step_count`) | 20 (기본 흐름만 약 10단계) → 초과 시 현재 결과로 HITL③ |
+| 규칙 판정 기준 | 온종일 = 16:00 이후까지, 낮잠 = 12:00~15:00 시작·60분+, 점심 = 11:30~13:00 시작 (`rules.py` 상수) |
 | LangGraph `recursion_limit` | 50 |
 | LLM 호출 재시도 / 파싱 실패 재요청 | 지수 백오프 최대 3회 / 최대 2회 |
 | 후보 장소 개수 | 약 10개, 카테고리(관광·식사·휴식) 균형 |
@@ -105,8 +107,9 @@ class AgentState(TypedDict, total=False):
     unsupported_destination: str | None; similar_cities: list[str]
     candidates: list[Candidate]
     add_requests: list[str]; notice: str | None; candidates_confirmed: bool   # HITL②
-    next: Worker; brief: str; step_count: int; itinerary: Itinerary | None   # M4
-    critique: list[str]; retry_count: int; revise_days: list[int]          # M5 예정
+    next: Worker; brief: str; step_count: int; itinerary: Itinerary | None
+    revise_days: list[int]; revise_reason: str; retry_count: int           # 재작업
+    itinerary_checked, final_approved: bool; critique: list[str]; saved_paths: list[str]
 ```
 (위는 필드 요약이다. 실제 코드에서는 필드마다 타입을 명시한다.)
 
@@ -150,18 +153,18 @@ src/travel_agent/
 ├── state.py                 # TripRequest, Candidate, Activity/DayPlan/Itinerary, AgentState
 ├── config.py                # 경로·모델·환경 변수
 ├── llm.py                   # Chat 모델 생성 (Anthropic / Bedrock)
-├── ui.py                    # rich 표·요약 문구
-├── agents/                  # intake, approval, researcher, supervisor, planner (M5 critic)
+├── ui.py / output.py        # rich 표·요약 문구 / JSON·Markdown 저장
+├── agents/                  # intake, approval, researcher, supervisor, planner, critic, final_approval
 ├── tools/                   # places.py (search_places), travel.py (estimate_travel_time)
-├── prompts/                 # tagger, researcher, intake, approval, supervisor, planner_* (.md)
-├── rules.py                 # (M5) 테마 규칙 검사 (순수 함수)
+├── prompts/                 # 에이전트별 프롬프트 (.md)
+├── rules.py                 # 테마 규칙 검사 (순수 함수)
 └── ingest/                  # __main__, cities, crawler, chunk, tagger, index, search
 tests/
 ├── test_chunk.py            # 위키텍스트 파서 단위 테스트
 ├── test_tools.py            # 순위 보정·이동 시간 단위 테스트
 ├── test_intake.py           # intake 병합·필수 필드·질문, 후보 제거 단위 테스트
-├── test_supervisor.py       # 라우팅 허용 범위, 일정 grounding 단위 테스트
-├── test_rules.py            # (M5) 테마 규칙 단위 테스트
+├── test_supervisor.py       # 라우팅 허용 순서, 일정 grounding
+├── test_rules.py / test_critic*.py / test_output.py   # 규칙, Critic 판단·날짜 병합, 파일 출력
 └── eval_retrieval.py        # 한국어 질문↔정답 장소 20쌍, Hit@5 (pytest 대상 아님)
 ```
 
@@ -181,12 +184,9 @@ tests/
 - interrupt 노드에서 `interrupt()` 앞에는 부작용 있는 코드를 두지 않는다 (재개 시 노드가 처음부터 다시 실행됨)
 - Chroma 접근은 `tools.places._store()`를 거친다 (병렬 도구 호출 대비 잠금으로 한 번만 연다)
 
-### 데이터·보안
-- `.env`, `data/raw/`, `data/chroma/`, `data/checkpoints.db`는 커밋하지 않는다
-- 키는 `.env.example`에 이름만 둔다
-- 네이버 API 결과는 디스크에 저장하지 않는다
-
-### Git
+### 데이터·보안·Git
+- `.env`, `data/raw/`, `data/chroma/`, `data/checkpoints.db`, `output/`은 커밋하지 않는다
+- 키는 `.env.example`에 이름만 둔다. 네이버 API 결과는 디스크에 저장하지 않는다
 - 커밋 메시지는 Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`)
 
 ### 문서
@@ -195,5 +195,5 @@ tests/
 
 ## 주의 / 미결정
 - bge-m3는 약 2GB, 최초 1회 다운로드. Windows에서 한국어 출력 시 `PYTHONIOENCODING=utf-8` 필요할 수 있음
-- Researcher 후보는 프롬프트로 10곳, 추가 요청은 "요청 수만큼, 최대 3곳"
-- 미지원 도시의 "일반 지식으로 진행" 경로는 미구현 (FR-11 일부)
+- Researcher 후보는 프롬프트로 10곳, 추가 요청은 "요청 수만큼, 최대 3곳". 미지원 도시의 "일반 지식으로 진행"은 미구현 (FR-11 일부)
+- 미결정: 힐링 "주요 활동 사이 30분" 규칙이 같은 단지 안 연속 관람에도 적용돼 엄격함 (SERVICE.md 16절)
