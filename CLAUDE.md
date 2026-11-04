@@ -21,7 +21,7 @@ uv run python tests/eval_retrieval.py [--theme]       # 검색 품질 Hit@5
 uv run python -m travel_agent.agents.researcher --city jeju --theme family --days 4 --children 5  # Researcher 단독 실행
 uv run pytest                                         # 단위 테스트
 uv run ruff check . && uv run ruff format .
-uv run python -m travel_agent.main                    # (예정, M3) CLI 실행
+uv run python -m travel_agent.main [--thread <id>]    # CLI 실행 / 대화 이어서 하기
 ```
 
 ## 아키텍처
@@ -40,9 +40,12 @@ START → intake ──(필수 정보 부족 / 미지원 도시)→ [HITL①] �
                 ├─ 수정 요청 → Supervisor (revise_days만 재생성)
                 └─ 승인 → save → END
 ```
+현재 구현(M3): `intake →(missing/미지원)→ ask_user → intake`, `intake → research → approve →(추가 요청)→ research`, `approve →(애매한 답)→ approve`, `approve →(확정)→ END` (M4에서 END 대신 Supervisor)
 
 ### 노드
-- **intake**: 입력에서 `TripRequest` 추출 (structured output, `LIGHT_MODEL`). 필수 필드 누락·미지원 도시 시 HITL①
+- **intake**: LLM(`LIGHT_MODEL`)은 `IntakeExtraction` 추출만 한다. 병합(`merge_request`), 박/일 보정, 필수 필드 판단(`missing_fields`), 질문 문구(`build_question`)는 결정적 코드. 대화 전체를 매번 다시 읽어 최신 조건을 만든다
+- **ask_user** (HITL①): `interrupt({"type": "ask", "question"})` → 답을 메시지에 추가하고 intake로. 미지원 도시는 비슷한 지원 도시 + 전체 목록 안내
+- **approve** (HITL②): `interrupt({"type": "approve_candidates", "candidates", "notice"})` → `approval.parse_reply()`가 `remove`/`add_requests`/`approve`로 해석. 뺀 후보는 `approved=False`로 남긴다
 - **Supervisor**: structured output으로 `next` 결정. 매 결정마다 `step_count += 1`
 - **Researcher**: `langchain.agents.create_agent` (ReAct) + `response_format=ToolStrategy(CandidateList)`. `summary_ko`·`reason_ko`는 항상 한국어. 결과는 `ground_candidates()`로 인덱스에서 재조회해 `source_url`·좌표를 채우고 인덱스에 없는 장소는 버린다
 - **Family / Healing Planner**: 승인된 `Candidate`만 사용해 `Itinerary` 생성. `revise_days`가 있으면 해당 날만 재생성
@@ -67,7 +70,7 @@ START → intake ──(필수 정보 부족 / 미지원 도시)→ [HITL①] �
 | 낮잠 규칙 적용 | `min(children_ages) <= 6` |
 | 테마 순위 보정 (`THEME_BOOST`) | 태그된 장소의 cosine 거리 −0.05, 3배수로 가져와 재정렬 |
 | 이동 시간 (우회 계수 / 속도 / 추가 시간) | car 1.3·40km/h·+5분, taxi 1.3·25km/h·+5분, transit 1.4·22km/h·+10분, 도보 1.2·4.5km/h (초기값) |
-| Researcher `recursion_limit` | 30 |
+| Researcher `recursion_limit` | 기본 30, 추가 요청 16. 초과 시 `GraphRecursionError`를 잡아 빈 결과 + 안내 문구 |
 
 ## 데이터 모델 (`state.py`)
 ```python
@@ -93,10 +96,14 @@ class Activity(BaseModel):
 class DayPlan(BaseModel):     day: int; summary: str; activities: list[Activity]
 class Itinerary(BaseModel):   title, theme; days: list[DayPlan]; tips, warnings: list[str]
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
     request: TripRequest
+    missing: list[MissingField]          # destination / duration / theme / children_ages
+    unsupported_destination: str | None; similar_cities: list[str]
     candidates: list[Candidate]
+    add_requests: list[str]; notice: str | None; candidates_confirmed: bool   # HITL②
+    # --- M4~ ---
     itinerary: Itinerary | None
     critique: list[str]
     retry_count, step_count: int
@@ -140,19 +147,21 @@ data/
 ├── logs/
 └── checkpoints.db
 src/travel_agent/
-├── main.py                  # (M3) CLI 루프 (interrupt 처리, thread_id)
-├── graph.py                 # (M3) StateGraph 조립
-├── state.py                 # TripRequest, Candidate (M3~ AgentState 등 추가)
+├── main.py                  # CLI 루프 (interrupt 처리, thread_id, 중단 지점 재개)
+├── graph.py                 # StateGraph 조립, make_checkpointer()
+├── state.py                 # TripRequest, Candidate, AgentState
 ├── config.py                # 경로·모델·환경 변수
 ├── llm.py                   # Chat 모델 생성 (Anthropic / Bedrock)
-├── agents/                  # researcher (M4~ supervisor, planners, critic)
+├── ui.py                    # rich 표·요약 문구
+├── agents/                  # intake, approval, researcher (M4~ supervisor, planners, critic)
 ├── tools/                   # places.py (search_places), travel.py (estimate_travel_time)
-├── prompts/                 # 프롬프트 파일 (tagger.md, ...)
+├── prompts/                 # tagger, researcher, intake, approval (.md)
 ├── rules.py                 # (M5) 테마 규칙 검사 (순수 함수)
 └── ingest/                  # __main__, cities, crawler, chunk, tagger, index, search
 tests/
 ├── test_chunk.py            # 위키텍스트 파서 단위 테스트
 ├── test_tools.py            # 순위 보정·이동 시간 단위 테스트
+├── test_intake.py           # intake 병합·필수 필드·질문, 후보 제거 단위 테스트
 ├── test_rules.py            # (M5) 테마 규칙 단위 테스트
 └── eval_retrieval.py        # 한국어 질문↔정답 장소 20쌍, Hit@5 (pytest 대상 아님)
 ```
@@ -168,6 +177,10 @@ tests/
 - 프롬프트는 인라인으로 쓰지 않고 `prompts/` 파일로 분리한다
 - 새 테마는 `agents/` Planner + `prompts/` 프롬프트 + `rules.py` 규칙 추가로 확장한다
 - `rules.py`는 LLM을 호출하지 않는 **순수 함수**로, 규칙마다 pytest 단위 테스트를 둔다. 기준값은 SERVICE.md 8절
+- LLM은 추출·생성만 맡기고, 판단(필수 필드, 라우팅, 후보 제거)은 결정적 코드로 한다
+- 상태에 새 Pydantic 모델을 넣으면 `graph.CHECKPOINT_TYPES`에 등록한다 (미등록 타입은 체크포인트 복원 시 차단 예정)
+- interrupt 노드에서 `interrupt()` 앞에는 부작용 있는 코드를 두지 않는다 (재개 시 노드가 처음부터 다시 실행됨)
+- Chroma 접근은 `tools.places._store()`를 거친다 (병렬 도구 호출 대비 잠금으로 한 번만 연다)
 
 ### 데이터·보안
 - `.env`, `data/raw/`, `data/chroma/`, `data/checkpoints.db`는 커밋하지 않는다
@@ -182,7 +195,6 @@ tests/
 - 제품 결정(무엇을·왜)은 SERVICE.md, 구현 결정(어떻게)은 CLAUDE.md에 둔다
 
 ## 주의 / 미결정
-- Python 3.14에서 torch 2.15·chromadb 1.5·sentence-transformers 6.2 동작 확인됨
-- bge-m3는 약 2GB, 최초 1회 다운로드 (이후 HF 캐시 사용)
-- Windows 터미널에서 한국어 출력 시 `PYTHONIOENCODING=utf-8` 필요할 수 있음
-- Researcher는 후보를 10곳보다 조금 많이(11~12곳) 내는 경향 — M3 승인 화면에서 상한 조정 예정
+- bge-m3는 약 2GB, 최초 1회 다운로드. Windows에서 한국어 출력 시 `PYTHONIOENCODING=utf-8` 필요할 수 있음
+- Researcher 후보는 프롬프트로 10곳, 추가 요청은 "요청 수만큼, 최대 3곳"
+- 미지원 도시의 "일반 지식으로 진행" 경로는 미구현 (FR-11 일부)
