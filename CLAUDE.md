@@ -18,6 +18,7 @@ uv run python -m travel_agent.ingest                  # 적재 전체 (crawl →
 uv run python -m travel_agent.ingest --city jeju --steps crawl chunk   # 도시·단계 선택
 uv run python -m travel_agent.ingest.search "아이랑 갈 수족관" --city okinawa  # 검색 확인
 uv run python tests/eval_retrieval.py [--theme]       # 검색 품질 Hit@5
+uv run python -m travel_agent.agents.researcher --city jeju --theme family --days 4 --children 5  # Researcher 단독 실행
 uv run pytest                                         # 단위 테스트
 uv run ruff check . && uv run ruff format .
 uv run python -m travel_agent.main                    # (예정, M3) CLI 실행
@@ -43,7 +44,7 @@ START → intake ──(필수 정보 부족 / 미지원 도시)→ [HITL①] �
 ### 노드
 - **intake**: 입력에서 `TripRequest` 추출 (structured output, `LIGHT_MODEL`). 필수 필드 누락·미지원 도시 시 HITL①
 - **Supervisor**: structured output으로 `next` 결정. 매 결정마다 `step_count += 1`
-- **Researcher**: `create_react_agent` 기반. `Candidate` 리스트 반환, `summary_ko`는 항상 한국어
+- **Researcher**: `langchain.agents.create_agent` (ReAct) + `response_format=ToolStrategy(CandidateList)`. `summary_ko`·`reason_ko`는 항상 한국어. 결과는 `ground_candidates()`로 인덱스에서 재조회해 `source_url`·좌표를 채우고 인덱스에 없는 장소는 버린다
 - **Family / Healing Planner**: 승인된 `Candidate`만 사용해 `Itinerary` 생성. `revise_days`가 있으면 해당 날만 재생성
 - **Critic**: `rules.py` 검사 결과 + LLM 검토를 `critique`에 기록
 - **save**: rich 표 출력, `itinerary.json` / `itinerary.md` 저장 (출처 목록 + CC BY-SA 문구)
@@ -52,8 +53,8 @@ START → intake ──(필수 정보 부족 / 미지원 도시)→ [HITL①] �
 | 도구 | 동작 |
 |---|---|
 | `search_places(query, city, theme)` | Chroma 검색. `city`로만 필터하고, `theme`은 태그가 있으면 순위를 올리는 신호로만 쓴다 (테마 필터를 걸면 Hit@5 90% → 85%) |
-| `search_blog(query)` | 네이버 블로그 검색 API. 결과는 저장하지 않음 |
-| `estimate_travel_time(place_a, place_b, transport)` | haversine 거리 × 이동 수단별 보정계수. 좌표 없으면 30분 |
+| `estimate_travel_time(city, place_a, place_b, transport)` | 인덱스에서 두 장소 좌표 조회 → haversine × 보정계수(아래). 1km 이하는 도보, 좌표 없으면 30분 |
+| `search_blog(query)` | **보류** (네이버 키 없음). 추가 시 결과는 저장하지 않음 |
 
 ### 구현 상수
 | 항목 | 값 |
@@ -64,6 +65,9 @@ START → intake ──(필수 정보 부족 / 미지원 도시)→ [HITL①] �
 | LLM 호출 재시도 / 파싱 실패 재요청 | 지수 백오프 최대 3회 / 최대 2회 |
 | 후보 장소 개수 | 약 10개, 카테고리(관광·식사·휴식) 균형 |
 | 낮잠 규칙 적용 | `min(children_ages) <= 6` |
+| 테마 순위 보정 (`THEME_BOOST`) | 태그된 장소의 cosine 거리 −0.05, 3배수로 가져와 재정렬 |
+| 이동 시간 (우회 계수 / 속도 / 추가 시간) | car 1.3·40km/h·+5분, taxi 1.3·25km/h·+5분, transit 1.4·22km/h·+10분, 도보 1.2·4.5km/h (초기값) |
+| Researcher `recursion_limit` | 30 |
 
 ## 데이터 모델 (`state.py`)
 ```python
@@ -75,7 +79,8 @@ class TripRequest(BaseModel):
     transport: str | None                # 없으면 cities.yaml 도시 기본값
 
 class Candidate(BaseModel):
-    place, city, category, summary_ko, source_url: str
+    place, city, summary_ko, reason_ko, source_url: str   # place = 인덱스의 정확한 이름
+    category: Literal["sight", "activity", "meal", "rest", "shop"]
     lat, lon: float | None
     approved: bool = True
 
@@ -137,16 +142,17 @@ data/
 src/travel_agent/
 ├── main.py                  # (M3) CLI 루프 (interrupt 처리, thread_id)
 ├── graph.py                 # (M3) StateGraph 조립
-├── state.py                 # (M2~) State, Pydantic 모델
+├── state.py                 # TripRequest, Candidate (M3~ AgentState 등 추가)
 ├── config.py                # 경로·모델·환경 변수
 ├── llm.py                   # Chat 모델 생성 (Anthropic / Bedrock)
-├── agents/                  # (M2~) supervisor, researcher, planners, critic
-├── tools/                   # (M2~) search_places, search_blog, estimate_travel_time
+├── agents/                  # researcher (M4~ supervisor, planners, critic)
+├── tools/                   # places.py (search_places), travel.py (estimate_travel_time)
 ├── prompts/                 # 프롬프트 파일 (tagger.md, ...)
 ├── rules.py                 # (M5) 테마 규칙 검사 (순수 함수)
 └── ingest/                  # __main__, cities, crawler, chunk, tagger, index, search
 tests/
 ├── test_chunk.py            # 위키텍스트 파서 단위 테스트
+├── test_tools.py            # 순위 보정·이동 시간 단위 테스트
 ├── test_rules.py            # (M5) 테마 규칙 단위 테스트
 └── eval_retrieval.py        # 한국어 질문↔정답 장소 20쌍, Hit@5 (pytest 대상 아님)
 ```
@@ -179,4 +185,4 @@ tests/
 - Python 3.14에서 torch 2.15·chromadb 1.5·sentence-transformers 6.2 동작 확인됨
 - bge-m3는 약 2GB, 최초 1회 다운로드 (이후 HF 캐시 사용)
 - Windows 터미널에서 한국어 출력 시 `PYTHONIOENCODING=utf-8` 필요할 수 있음
-- 미결정: `estimate_travel_time` 보정계수
+- Researcher는 후보를 10곳보다 조금 많이(11~12곳) 내는 경향 — M3 승인 화면에서 상한 조정 예정
