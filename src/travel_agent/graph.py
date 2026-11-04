@@ -236,7 +236,14 @@ def make_planner_node(theme: str):
 def critic_node(state: AgentState) -> dict:
     itinerary = state["itinerary"]
     approved = [c for c in state.get("candidates") or [] if c.approved]
-    violations = critique(itinerary, state["request"], approved)
+    traveller_request = state.get("traveller_request", "")
+    violations = critique(
+        itinerary,
+        state["request"],
+        approved,
+        traveller_request,
+        state.get("traveller_request_days") or [],
+    )
     messages = [format_violation(v) for v in violations]
     retries = state.get("retry_count", 0)
     get_stream_writer()(
@@ -244,10 +251,14 @@ def critic_node(state: AgentState) -> dict:
     )
     if violations and retries < MAX_RETRIES:
         all_days = [d.day for d in itinerary.days]
+        reason = "\n".join(f"- {m}" for m in messages)
+        if traveller_request:
+            # Keep the traveller's original ask in view while fixing rule violations.
+            reason += f"\n- 여행자 요청(계속 지켜야 함): {traveller_request}"
         return {
             "critique": messages,
             "revise_days": days_to_redo(violations, all_days),
-            "revise_reason": "\n".join(f"- {m}" for m in messages),
+            "revise_reason": reason,
             "retry_count": retries + 1,
             "itinerary_checked": False,
         }
@@ -270,16 +281,25 @@ def final_approval_node(state: AgentState) -> dict:
     days = days_to_revise(decision, len(itinerary.days))
     update: dict = {"messages": [HumanMessage(str(reply))]}
     if days:
+        request = decision.request or str(reply)
         return {
             **update,
             "final_approved": False,
             "revise_days": days,
-            "revise_reason": decision.request or str(reply),
+            "revise_reason": request,
+            "traveller_request": request,  # the critic checks this was honoured
+            "traveller_request_days": days,
             "retry_count": 0,  # a traveller revision starts a new critic cycle
             "itinerary_checked": False,
         }
-    # Approve, or an unclear reply (the supervisor will ask again).
-    return {**update, "final_approved": decision.approve}
+    if decision.approve:
+        return {
+            **update,
+            "final_approved": True,
+            "traveller_request": "",
+            "traveller_request_days": [],
+        }
+    return {**update, "final_approved": False}  # unclear reply: the supervisor asks again
 
 
 def save_node(state: AgentState, config: RunnableConfig) -> dict:

@@ -113,6 +113,8 @@ def merge_days(
 ) -> tuple[Itinerary, list[int]]:
     """Take only `revise_days` from `revised`; every other day stays from `current`.
 
+    Trip-level tips come from `revised` (the planner saw the whole updated trip), so they
+    don't mention places that were just removed. The title stays from `current`.
     Returns the merged itinerary and the requested days the revised plan did not contain.
     """
     new_by_day = {d.day: d for d in revised.days}
@@ -125,7 +127,10 @@ def merge_days(
             if day.day in revise_days:
                 missing.append(day.day)
             days.append(day)
-    return current.model_copy(update={"days": days}), missing
+    update: dict = {"days": days}
+    if revised.tips:
+        update["tips"] = revised.tips
+    return current.model_copy(update=update), missing
 
 
 def stream_plan(

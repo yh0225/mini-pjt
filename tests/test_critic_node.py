@@ -62,3 +62,13 @@ def test_clean_plan_clears_old_warnings(stub):
     out = graph.critic_node(s)
     assert out["itinerary_checked"] is True
     assert out["itinerary"].warnings == []
+
+
+def test_rework_reason_keeps_the_traveller_request(stub):
+    stub([Violation(day=2, rule="family_max_moves", message="이동이 4번이에요")])
+    s = state(retry=0)
+    s["traveller_request"] = "2일차 오전은 실내로"
+    s["traveller_request_days"] = [2]
+    out = graph.critic_node(s)
+    assert "이동이 4번이에요" in out["revise_reason"]
+    assert "2일차 오전은 실내로" in out["revise_reason"]

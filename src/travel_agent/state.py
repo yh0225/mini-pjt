@@ -105,4 +105,6 @@ class AgentState(TypedDict, total=False):
     itinerary_checked: bool  # critic has checked the current itinerary
     critique: list[str]  # latest critic findings (Korean)
     final_approved: bool
+    traveller_request: str  # change the traveller asked for at HITL③ (critic checks it)
+    traveller_request_days: list[int]  # days that change applies to
     saved_paths: list[str]
