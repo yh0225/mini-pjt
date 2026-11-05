@@ -1,6 +1,7 @@
 import json
 
-from travel_agent.output import save_itinerary, sources, to_markdown
+from travel_agent import output
+from travel_agent.output import save_itinerary, sources, to_html, to_markdown
 from travel_agent.state import Activity, Candidate, DayPlan, Itinerary, TripRequest
 
 REQUEST = TripRequest(destination="jeju", nights=0, days=1, theme="family", children_ages=[5])
@@ -63,8 +64,40 @@ def test_markdown_has_days_tips_warnings_sources_and_license():
 
 
 def test_save_writes_json_and_markdown(tmp_path):
-    paths = save_itinerary(ITIN, REQUEST, CANDS, "t1", base_dir=tmp_path)
+    paths = save_itinerary(ITIN, REQUEST, CANDS, "t1", base_dir=tmp_path, pdf=False)
     assert [p.name for p in paths] == ["itinerary.json", "itinerary.md"]
     data = json.loads(paths[0].read_text(encoding="utf-8"))
     assert data["itinerary"]["title"] == "제주 가족 여행"
     assert data["sources"] == [{"place": "Beach", "url": "https://en.wikivoyage.org/wiki/Jeju"}]
+
+
+def test_html_escapes_text_and_marks_moves():
+    itin = ITIN.model_copy(deep=True)
+    itin.days[0].activities.append(
+        Activity(start="13:00", end="13:30", title="<b>이동</b>", place="이동", category="move")
+    )
+    page = to_html(itin, REQUEST, CANDS)
+    assert "&lt;b&gt;이동&lt;/b&gt;" in page and "<b>이동</b>" not in page
+    assert '<tr class="move">' in page
+    assert "1일차 — 해변" in page and "1일차: 이동이 많아요." in page and "선크림" in page
+    assert (
+        '<a href="https://en.wikivoyage.org/wiki/Jeju">Beach</a>' in page and "Unused" not in page
+    )
+    assert "CC BY-SA" in page
+
+
+def test_save_adds_pdf_when_written(tmp_path, monkeypatch):
+    def fake_write_pdf(html_text, pdf_path):
+        pdf_path.write_bytes(b"%PDF")
+        return True
+
+    monkeypatch.setattr(output, "write_pdf", fake_write_pdf)
+    paths = save_itinerary(ITIN, REQUEST, CANDS, "t1", base_dir=tmp_path)
+    assert [p.name for p in paths] == ["itinerary.json", "itinerary.md", "itinerary.pdf"]
+
+
+def test_save_skips_pdf_without_browser(tmp_path, monkeypatch):
+    monkeypatch.setattr(output, "find_browser", lambda: None)
+    paths = save_itinerary(ITIN, REQUEST, CANDS, "t1", base_dir=tmp_path)
+    assert [p.name for p in paths] == ["itinerary.json", "itinerary.md"]
+    assert not (tmp_path / "t1" / "itinerary.pdf").exists()

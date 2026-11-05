@@ -24,6 +24,21 @@ PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-sonnet-5-5")
 LIGHT_MODEL = os.getenv("LIGHT_MODEL", "claude-haiku-5-5")
 
+# Headless Chromium-family browser used to print itinerary.pdf. Empty = first existing default.
+PDF_BROWSER = os.getenv("PDF_BROWSER", "")
+PDF_BROWSER_DEFAULTS = [
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "google-chrome",
+    "chromium",
+    "chromium-browser",
+    "microsoft-edge",
+]
+PDF_TIMEOUT_SECONDS = 60
+
 EMBEDDING_MODEL = "BAAI/bge-m3"
 CHROMA_COLLECTION = "places"
 
