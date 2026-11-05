@@ -49,7 +49,7 @@ START → intake ──(필수 정보 부족)→ [HITL①] ↺   ──(미지�
 - **reject**: 미지원 도시면 (부족 정보가 있어도 먼저) `unsupported_message()`로 지원 도시 목록을 안내하고 END. CLI는 종료된 대화를 다시 열어도 같은 안내만 보여준다
 - **approve** (HITL②): `interrupt({"type": "approve_candidates", "candidates", "notice"})` → `approval.parse_reply()`가 `remove`/`add_requests`/`approve`로 해석. 뺀 후보는 `approved=False`로 남긴다
 - **Supervisor** (`LIGHT_MODEL`): structured output으로 `next`·`brief`(작업자에게 줄 영어 지시)·`reason`(사용자에게 보일 한국어 한 줄) 결정. `allowed_workers(state)`가 상태별 허용 작업자를 정하고 `enforce()`가 허용 밖 선택을 기본값으로 덮는다. 매 결정마다 `step_count += 1`. 20회 이후엔 재작업·검증을 건너뛰고 final_approval → save로 마무리
-- **Researcher**: `langchain.agents.create_agent` (ReAct) + `response_format=ToolStrategy(CandidateList)`. `summary_ko`·`reason_ko`는 항상 한국어. 결과는 `ground_candidates()`로 인덱스에서 재조회해 `source_url`·좌표를 채우고 인덱스에 없는 장소는 버린다
+- **Researcher**: `langchain.agents.create_agent` (ReAct) + `response_format=ToolStrategy(CandidateList)`. `summary_ko`·`reason_ko`는 항상 한국어. 결과는 `ground_candidates()`로 인덱스에서 재조회해 `source_url`·좌표를 채우고, 인덱스에 없는 장소와 `safety.is_blocked_place()`(카페 아닌 Drink 섹션, 카지노·성인 업소)는 버린다
 - **Family / Healing Planner**: 구현 하나(`agents/planner.py`)를 공유하고 프롬프트(`planner_base.md` + `planner_{theme}.md`)만 다르다. `create_agent` + `estimate_travel_time` + `ToolStrategy(Itinerary)`. 승인된 `Candidate`만 사용. `ground_itinerary()`가 `source_url`을 채운다. `revise_days`가 있으면 현재 일정 + 고칠 이유를 주고 다시 만든 뒤 `merge_days()`가 **그 날짜만** 반영한다 (여행 팁은 새 결과로 교체, 제목은 유지)
 - **Critic**: `rules.check_itinerary()`(권위) + `llm_review()`(미등록 장소·중복 방문·모순, 실패해도 무시). 위반이 있고 `retry_count < 2`면 위반 날짜를 `revise_days`로(사유에 `traveller_request` 원문 포함), 아니면 남은 위반을 `itinerary.warnings`로 덮어쓰고 `itinerary_checked=True`
   - 수정 요청 확인: **코드**(`activities_to_judge`)가 요청 날짜 + 시간대(`REQUEST_WINDOWS`: 오전·아침 <12, 점심 11–14, 오후 12–18, 저녁·밤 ≥18, 없으면 하루 전체)의 활동만 고르고(이동·식사 제외), LLM은 날짜별 `request_checks`(`satisfied`)만 답한다. `satisfied=False`만 `rule="request"` 위반
@@ -149,6 +149,7 @@ src/travel_agent/
 ├── state.py                 # TripRequest, Candidate, Activity/DayPlan/Itinerary, AgentState
 ├── config.py                # 경로·모델·환경 변수
 ├── llm.py                   # Chat 모델 생성 (Anthropic / Bedrock), LLMOutput
+├── safety.py                # 가드레일: 입력 개인정보 가리기·안내, 부적절 선호·장소 차단 (LLM 없음)
 ├── ui.py / output.py        # rich 표·요약 문구 / JSON·Markdown 저장
 ├── evaluation.py            # 평가 실행·채점 (evaluation/run_eval.py가 호출)
 ├── agents/                  # intake, approval, researcher, supervisor, planner, critic, final_approval
@@ -182,6 +183,7 @@ tests/                       # test_*.py: 파서·도구·intake·라우팅·규
 - 상태에 새 Pydantic 모델을 넣으면 `graph.CHECKPOINT_TYPES`에 등록한다 (미등록 타입은 체크포인트 복원 시 차단 예정)
 - interrupt 노드에서 `interrupt()` 앞에는 부작용 있는 코드를 두지 않는다 (재개 시 노드가 처음부터 다시 실행됨)
 - Chroma 접근은 `tools.places._store()`를 거친다 (병렬 도구 호출 대비 잠금으로 한 번만 연다)
+- 사용자 입력은 **그래프에 넣기 전에** `safety.guard_input()`을 거친다 (CLI·평가 모두. 노드 안에서 가리면 첫 체크포인트에 원문이 남음). 한글 뒤 숫자 패턴은 `\b` 대신 숫자 lookaround (한글도 \w라 경계가 안 잡힘)
 
 ### 데이터·보안·Git
 - `.env`, `data/raw/`, `data/chroma/`, `data/checkpoints.db`, `output/`, `evaluation/results/`는 커밋하지 않는다
