@@ -17,5 +17,6 @@ data/logs/
 
 # Outputs
 output/
+evaluation/results/
 itinerary.json
 itinerary.md
