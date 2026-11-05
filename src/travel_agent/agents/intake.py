@@ -9,15 +9,15 @@ from datetime import date
 from functools import lru_cache
 
 from langchain_core.messages import AnyMessage, HumanMessage
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from travel_agent.config import PROMPTS_DIR
 from travel_agent.ingest.cities import City, load_cities
-from travel_agent.llm import get_chat_model
+from travel_agent.llm import LLMOutput, get_chat_model
 from travel_agent.state import MissingField, Theme, Transport, TripRequest
 
 
-class IntakeExtraction(BaseModel):
+class IntakeExtraction(LLMOutput):
     destination_name: str | None = None
     city_id: str | None = None
     nights: int | None = None

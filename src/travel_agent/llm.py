@@ -12,8 +12,32 @@ import os
 from typing import Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from pydantic import BaseModel, model_validator
 
 from travel_agent.config import AGENT_MODEL, LIGHT_MODEL
+
+NULL_STRINGS = {"null", "none", "nil", "n/a", ""}
+
+
+class LLMOutput(BaseModel):
+    """Base for structured LLM outputs whose fields are often empty.
+
+    Models sometimes return the *string* "null" (or "None", "") instead of an empty value,
+    which fails validation for ints, dates, literals, and lists. Such top-level values are
+    dropped before validation so the field's default applies.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_null_strings(cls, data):
+        if isinstance(data, dict):
+            return {
+                k: v
+                for k, v in data.items()
+                if not (isinstance(v, str) and v.strip().lower() in NULL_STRINGS)
+            }
+        return data
+
 
 Provider = Literal["anthropic", "bedrock"]
 Role = Literal["agent", "light"]

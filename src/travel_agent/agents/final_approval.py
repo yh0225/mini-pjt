@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from travel_agent.config import PROMPTS_DIR
-from travel_agent.llm import get_chat_model
+from travel_agent.llm import LLMOutput, get_chat_model
 from travel_agent.state import Itinerary
 
 
-class FinalDecision(BaseModel):
+class FinalDecision(LLMOutput):
     approve: bool = False
     revise_days: list[int] = Field(default_factory=list)
     all_days: bool = False

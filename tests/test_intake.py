@@ -81,3 +81,28 @@ def test_apply_removals_uses_positions_among_approved_only():
     result = apply_removals(cands, [2, 99])  # 2nd shown item is C; 99 is ignored
     assert [c.place for c in result if c.approved] == ["A", "D"]
     assert len(result) == 4  # removed items are kept but hidden
+
+
+def test_intake_extraction_tolerates_null_strings_from_the_model():
+    # Regression: for "여행 가고 싶어" the model returned the string "null" for every field.
+    ext = IntakeExtraction.model_validate(
+        {
+            "destination_name": "null",
+            "city_id": "None",
+            "nights": "null",
+            "days": "null",
+            "theme": "null",
+            "children_ages": "null",
+            "transport": "",
+            "start_date": "null",
+        }
+    )
+    assert ext == IntakeExtraction()
+    assert missing_fields(merge_request(TripRequest(), ext)) == ["destination", "duration", "theme"]
+
+
+def test_null_string_handling_keeps_real_values():
+    ext = IntakeExtraction.model_validate(
+        {"destination_name": "제주", "nights": 2, "theme": "family"}
+    )
+    assert (ext.destination_name, ext.nights, ext.theme) == ("제주", 2, "family")
