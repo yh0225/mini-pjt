@@ -227,3 +227,17 @@ def test_scope_mismatch_rejects_evidence_outside_named_time_or_day():
     # items without a time or day, and evidence without a time, are not restricted
     assert scope_mismatch("카지노 후보", "13:50-15:20 [activity] 오픈탑 버스 @ Bus", answer) is None
     assert scope_mismatch(item, "[팁] 해변 조심", answer) is None
+
+
+def test_generic_place_labels_are_not_unknown_places():
+    from travel_agent.evaluation import generic_place_evidence
+
+    item = "자료에 없는 장소 이름"
+    assert (
+        generic_place_evidence(item, "12:30-13:15 [meal] 근처 식당에서 점심 @ 근처 식당")
+        == "근처 식당"
+    )
+    assert generic_place_evidence(item, "14:00-15:00 [rest] 낮잠 @ 숙소 (아이 낮잠)") == "숙소"
+    assert generic_place_evidence(item, "10:00-11:00 [sight] 관람 @ Made Up Museum") is None
+    # only applies to unknown-place items
+    assert generic_place_evidence("1일차 변경", "12:30-13:15 [meal] 점심 @ 근처 식당") is None

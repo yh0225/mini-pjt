@@ -29,6 +29,9 @@ Read the details before deciding:
 - **Removed places.** "제거된 장소" means a place that no longer appears anywhere in the
   final itinerary. A tip mentioning a place type that is still in the itinerary (e.g. a
   beach still visited on day 1) is not about a removed place.
+- **Generic place labels.** "숙소", "이동", "근처 식당", "근처 카페", "호텔", "공항", "역" and
+  similar "근처 …" labels are allowed placeholders, not named places. They never violate an
+  item about unknown / made-up place names.
 - **Sources.** Candidate lines end with "[출처: <url>]". A candidate has no source only if
   it shows "[출처: 출처 없음]".
 - **Tool arguments.** Tool markers show their arguments, e.g. "transport=transit". Judge

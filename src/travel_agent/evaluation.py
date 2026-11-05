@@ -354,6 +354,27 @@ def scope_mismatch(item: str, evidence: str, answer: str) -> str | None:
     return None
 
 
+# Placeholders the planner may use instead of a named place (prompts/planner_base.md,
+# prompts/critic_review.md). They are never "unknown named places".
+GENERIC_PLACE_LABELS = {"숙소", "이동", "호텔", "공항", "역", "자유 시간"}
+GENERIC_PLACE_PREFIXES = ("근처 ", "숙소 ")
+PLACE_IN_LINE_RE = re.compile(r"@ ([^(]+?)\s*(?:\(|$)")
+UNKNOWN_PLACE_ITEM_RE = re.compile(r"자료에 없는|장소 이름|지어낸|생성")
+
+
+def generic_place_evidence(item: str, evidence: str) -> str | None:
+    """The generic label an "unknown place" verdict was based on, if any (None = not generic)."""
+    if not UNKNOWN_PLACE_ITEM_RE.search(item):
+        return None
+    match = PLACE_IN_LINE_RE.search(evidence)
+    if not match:
+        return None
+    place = match.group(1).strip()
+    if place in GENERIC_PLACE_LABELS or place.startswith(GENERIC_PLACE_PREFIXES):
+        return place
+    return None
+
+
 def exact_violations(forbidden: list[str], answer: str) -> list[str]:
     norm = normalize(agent_output(answer))
     return [f"{item} => (문구 그대로 등장)" for item in forbidden if normalize(item) in norm]
@@ -378,7 +399,10 @@ def judge_violations(
         item = forbidden[verdict.index]
         if evidence_found(verdict.evidence, answer):
             mismatch = scope_mismatch(item, verdict.evidence, answer)
-            if mismatch:
+            generic = generic_place_evidence(item, verdict.evidence)
+            if generic:
+                notes.append(f"판정 무시(일반 표기 '{generic}'는 장소 이름이 아님): {item}")
+            elif mismatch:
                 notes.append(f"판정 무시(범위 밖: {mismatch}): {item} => {verdict.evidence!r}")
             else:
                 violations.append(f"{item} => {normalize(verdict.evidence)}")
