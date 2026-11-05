@@ -22,6 +22,7 @@ uv run python -m travel_agent.agents.researcher --city jeju --theme family --day
 uv run pytest                                         # 단위 테스트
 uv run ruff check . && uv run ruff format .
 uv run python -m travel_agent.main [--thread <id>]    # CLI 실행 / 대화 이어서 하기
+uv run python evaluation/run_eval.py [--ids ..] [--category ..] [--no-judge]   # 평가 → evaluation/results/
 ```
 
 ## 아키텍처
@@ -140,32 +141,30 @@ LIGHT_MODEL=
 
 ## 폴더 구조
 ```
-data/
-├── cities.yaml
-├── raw/                     # 원문(en/, ko/), chunks/, tags/ 캐시
-├── chroma/                  # 벡터 DB
-├── logs/
-└── checkpoints.db
+data/                        # cities.yaml, raw/(원문·chunks·tags 캐시), chroma/, logs/, checkpoints.db
+evaluation/                  # test_queries.csv, judge_forbidden.md, run_eval.py, results/(git 제외)
 src/travel_agent/
 ├── main.py                  # CLI 루프 (interrupt 처리, thread_id, 중단 지점 재개)
 ├── graph.py                 # StateGraph 조립, make_checkpointer()
 ├── state.py                 # TripRequest, Candidate, Activity/DayPlan/Itinerary, AgentState
 ├── config.py                # 경로·모델·환경 변수
-├── llm.py                   # Chat 모델 생성 (Anthropic / Bedrock)
+├── llm.py                   # Chat 모델 생성 (Anthropic / Bedrock), LLMOutput
 ├── ui.py / output.py        # rich 표·요약 문구 / JSON·Markdown 저장
+├── evaluation.py            # 평가 실행·채점 (evaluation/run_eval.py가 호출)
 ├── agents/                  # intake, approval, researcher, supervisor, planner, critic, final_approval
 ├── tools/                   # places.py (search_places), travel.py (estimate_travel_time)
 ├── prompts/                 # 에이전트별 프롬프트 (.md)
 ├── rules.py                 # 테마 규칙 검사 (순수 함수)
 └── ingest/                  # __main__, cities, crawler, chunk, tagger, index, search
-tests/
-├── test_chunk.py            # 위키텍스트 파서 단위 테스트
-├── test_tools.py            # 순위 보정·이동 시간 단위 테스트
-├── test_intake.py           # intake 병합·필수 필드·질문, 후보 제거 단위 테스트
-├── test_supervisor.py       # 라우팅 허용 순서, 일정 grounding
-├── test_rules.py / test_critic*.py / test_output.py   # 규칙, Critic 판단·날짜 병합, 파일 출력
+tests/                       # test_*.py: 파서·도구·intake·라우팅·규칙·Critic·출력·평가기 (LLM 호출 없음)
 └── eval_retrieval.py        # 한국어 질문↔정답 장소 20쌍, Hit@5 (pytest 대상 아님)
 ```
+
+## 평가 (`evaluation/`)
+- `test_queries.csv`: id, category(positive/negative/edge/guardrail), input, expected_traits, forbidden, expected_tools, note. `;`로 항목 구분
+- 실행: 문항마다 실제 그래프를 돌린다. 사전 상태가 필요한 문항(③에서의 수정 요청 등)은 `evaluation.SCENARIOS`의 대본(pre / input_at / post)으로 진행하고, 단계마다 멈춘 화면 종류를 확인한다
+- 채점: 도구는 입력 이후 호출 여부. forbidden은 문구 일치 + LLM 판정(기본 agent 모델). 판정은 **에이전트 출력에서 그대로 인용한 근거**가 있고, 항목이 말한 날짜·시간대 안일 때만 인정(`scope_mismatch`). expected_traits는 채점하지 않고 `review.md`에 답변과 나란히 둔다
+- forbidden에는 "~하지 않음/~없이" 같은 부재형 항목을 쓰지 않는다 (인용할 근거가 없어 판정 불가) → expected_traits로 둔다
 
 ## 규약
 ### 코드
@@ -175,6 +174,7 @@ tests/
 - 모델 ID·경로·키는 하드코딩하지 않고 `config.py`를 통해 읽는다
 - Chat 모델은 직접 만들지 않고 `llm.get_chat_model("agent" | "light")`로만 만든다
 - `temperature` 등 샘플링 파라미터는 넣지 않는다 (최신 Claude 모델은 기본값이 아니면 400)
+- 비어 있을 수 있는 필드가 많은 structured output 모델은 `llm.LLMOutput`을 상속한다 (모델이 `"null"` 문자열을 돌려줘도 기본값 적용)
 - 프롬프트는 인라인으로 쓰지 않고 `prompts/` 파일로 분리한다
 - 새 테마는 `prompts/planner_{theme}.md` + 그래프 노드(`make_planner_node`) + `rules.py` 규칙 추가로 확장한다
 - `rules.py`는 LLM을 호출하지 않는 **순수 함수**로, 규칙마다 pytest 단위 테스트를 둔다. 기준값은 SERVICE.md 8절
@@ -184,7 +184,7 @@ tests/
 - Chroma 접근은 `tools.places._store()`를 거친다 (병렬 도구 호출 대비 잠금으로 한 번만 연다)
 
 ### 데이터·보안·Git
-- `.env`, `data/raw/`, `data/chroma/`, `data/checkpoints.db`, `output/`은 커밋하지 않는다
+- `.env`, `data/raw/`, `data/chroma/`, `data/checkpoints.db`, `output/`, `evaluation/results/`는 커밋하지 않는다
 - 키는 `.env.example`에 이름만 둔다
 - 커밋 메시지는 Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`)
 

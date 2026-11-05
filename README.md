@@ -148,9 +148,10 @@ src/travel_agent/
   ingest/                 자료 수집·적재 파이프라인
   prompts/                에이전트별 프롬프트
 tests/                    단위 테스트, 검색 품질 평가
+evaluation/               에이전트 평가 질의(test_queries.csv)와 실행기
 ```
 
-생성되는 데이터(`data/raw/`, `data/chroma/`, `data/checkpoints.db`)와 결과물(`output/`)은 Git에 포함되지 않습니다.
+생성되는 데이터(`data/raw/`, `data/chroma/`, `data/checkpoints.db`)와 결과물(`output/`, `evaluation/results/`)은 Git에 포함되지 않습니다.
 
 ## 테스트
 
@@ -159,6 +160,24 @@ uv run pytest                              # 단위 테스트 (LLM 호출 없음
 uv run python tests/eval_retrieval.py      # 검색 품질: 한국어 질문 20개 Hit@5
 uv run ruff check . && uv run ruff format .
 ```
+
+## 에이전트 평가
+
+`evaluation/test_queries.csv`의 12문항(positive 5 · negative 2 · edge 3 · guardrail 2)을 실제 에이전트로 실행하고 채점합니다.
+
+```bash
+uv run python evaluation/run_eval.py                       # 전체
+uv run python evaluation/run_eval.py --category guardrail  # 카테고리만
+uv run python evaluation/run_eval.py --ids POS-01 NEG-02   # 특정 문항만
+```
+
+| 항목 | 채점 방식 |
+|---|---|
+| `expected_tools` | 입력 이후 해당 도구를 호출했는지 자동 확인 |
+| `forbidden` | 답변에 들어 있으면 실패. 문구 일치 + AI 판정(에이전트 출력에서 그대로 인용한 근거가 있을 때만 인정) |
+| `expected_traits` | 자동 채점하지 않고, 답변과 나란히 `review.md`에 남겨 사람이 확인 |
+
+카테고리별·전체 통과율을 출력하고 `evaluation/results/<실행 시각>/`에 `results.csv`, `summary.json`, `review.md`를 저장합니다. 일정 생성까지 가는 문항이 많아 전체 실행은 30~60분 정도 걸리고 LLM 호출 비용이 듭니다.
 
 ## 문서
 
