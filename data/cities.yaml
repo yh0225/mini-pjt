@@ -59,6 +59,12 @@ cities:
     transport: transit
     wikivoyage_en: [Fukuoka]
     wikivoyage_ko: []
+  - id: sapporo
+    name_ko: 삿포로
+    transport: transit
+    # Otaru (canal day trip) and Noboribetsu (onsen town) are reachable by JR
+    wikivoyage_en: [Sapporo, Otaru, Noboribetsu]
+    wikivoyage_ko: []
   - id: okinawa
     name_ko: 오키나와
     transport: car
