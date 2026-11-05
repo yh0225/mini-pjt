@@ -164,7 +164,7 @@ tests/                       # test_*.py: 파서·도구·intake·라우팅·규
 ## 평가 (`evaluation/`)
 - `test_queries.csv`: id, category(positive/negative/edge/guardrail), input, expected_traits, forbidden, expected_tools, note. `;`로 항목 구분
 - 실행: 문항마다 실제 그래프를 돌린다. 사전 상태가 필요한 문항(③에서의 수정 요청 등)은 `evaluation.SCENARIOS`의 대본(pre / input_at / post)으로 진행하고, 단계마다 멈춘 화면 종류를 확인한다
-- 채점: 도구는 입력 이후 호출 여부. forbidden은 문구 일치 + LLM 판정(기본 agent 모델). 판정은 **에이전트 출력에서 그대로 인용한 근거**가 있고, 항목이 말한 날짜·시간대 안일 때만 인정(`scope_mismatch`). expected_traits는 채점하지 않고 `review.md`에 답변과 나란히 둔다
+- 채점: 도구는 입력 이후 호출 여부. forbidden은 문구 일치 + LLM 판정(기본 agent 모델). 판정은 **에이전트 출력에서 그대로 인용한 근거**가 있고, 항목이 말한 날짜·시간대 안일 때만 인정(`scope_mismatch`). "자료에 없는 장소" 판정의 근거가 일반 표기(숙소·이동·근처 식당 등)면 버린다(`generic_place_evidence`). expected_traits는 채점하지 않고 `review.md`에 답변과 나란히 둔다
 - forbidden에 쓰지 않는 것 → expected_traits로: ① "~하지 않음/~없이" 같은 부재형 항목(인용할 근거가 없어 판정 불가) ② 재작업 2회 후 ⚠️로 남을 수 있는 것 — `rules.py` 테마 규칙 위반, Critic이 확인하는 수정 요청 미반영(정책상 허용, LLM이 개수를 잘못 셈). forbidden은 언제나 안 되는 것만
 
 ## 규약
