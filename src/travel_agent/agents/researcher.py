@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from travel_agent.config import PROMPTS_DIR
 from travel_agent.ingest.cities import City, load_cities
 from travel_agent.llm import get_chat_model
+from travel_agent.safety import is_blocked_place
 from travel_agent.state import Candidate, TripRequest
 from travel_agent.tools.places import lookup_place, search_places
 from travel_agent.tools.travel import estimate_travel_time
@@ -69,6 +70,9 @@ def ground_candidates(candidates: list[Candidate], city: str) -> list[Candidate]
         meta = lookup_place(city, c.place)
         if meta is None:
             log.warning("Dropping candidate not found in index: %s", c.place)
+            continue
+        if is_blocked_place(meta, c.summary_ko):
+            log.warning("Dropping off-topic candidate (nightlife/gambling/adult): %s", c.place)
             continue
         if c.place in seen:
             continue

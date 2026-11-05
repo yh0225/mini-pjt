@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from travel_agent.config import ROOT_DIR
 from travel_agent.graph import RECURSION_LIMIT, build_graph, make_checkpointer
+from travel_agent.safety import guard_input
 from travel_agent.ui import describe_request_ko
 
 log = logging.getLogger(__name__)
@@ -244,9 +245,15 @@ def run_case(graph, case: Case, thread_id: str) -> Result:
                     result.notes.append(f"대본 중단: '{want}'를 기대했지만 '{current}'에서 멈춤")
                     break
             recording = i >= input_index
+            guarded = guard_input(text)  # same entry guard as the CLI
             if recording:
                 transcript.append(f"[입력] {text}")
-            payload = {"messages": [HumanMessage(text)]} if i == 0 else Command(resume=text)
+                transcript += [f"[안내] {n}" for n in guarded.notices]
+            payload = (
+                {"messages": [HumanMessage(guarded.text)]}
+                if i == 0
+                else Command(resume=guarded.text)
+            )
             for mode, chunk in graph.stream(payload, cfg, stream_mode=["updates", "custom"]):
                 if not recording:
                     continue

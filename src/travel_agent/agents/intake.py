@@ -14,6 +14,7 @@ from pydantic import Field
 from travel_agent.config import PROMPTS_DIR
 from travel_agent.ingest.cities import City, load_cities
 from travel_agent.llm import LLMOutput, get_chat_model
+from travel_agent.safety import filter_preferences
 from travel_agent.state import MissingField, Theme, Transport, TripRequest
 
 
@@ -66,10 +67,12 @@ def merge_request(current: TripRequest, ext: IntakeExtraction) -> TripRequest:
         value = getattr(ext, field)
         if value is not None:
             updates[field] = value
-    for field in ("children_ages", "preferences"):
-        value = getattr(ext, field)
-        if value:
-            updates[field] = value
+    if ext.children_ages:
+        updates["children_ages"] = ext.children_ages
+    # Off-topic wishes (nightlife, gambling, adult venues) never reach the planners.
+    kept, _removed = filter_preferences(ext.preferences)
+    if kept or ext.preferences:
+        updates["preferences"] = kept
     if ext.city_id in cities_by_id():
         updates["destination"] = ext.city_id
     elif ext.destination_name:

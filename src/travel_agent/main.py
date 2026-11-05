@@ -19,6 +19,7 @@ from rich.console import Console
 from travel_agent.agents.intake import unsupported_message
 from travel_agent.config import CHECKPOINT_DB
 from travel_agent.graph import RECURSION_LIMIT, build_graph, make_checkpointer
+from travel_agent.safety import guard_input
 from travel_agent.state import Candidate, Itinerary
 from travel_agent.ui import candidates_table, describe_request_ko, itinerary_tables
 
@@ -76,6 +77,14 @@ def run(graph, payload: Any, config: dict) -> None:
                         summary = describe_request_ko(update["request"])
                         if summary:
                             console.print(f"  [dim]{summary}[/]")
+
+
+def guarded(text: str) -> str:
+    """Mask personal data and show policy notices before text enters the graph."""
+    result = guard_input(text)
+    for notice in result.notices:
+        console.print(f"[yellow]🔒 {notice}[/]")
+    return result.text
 
 
 def ask(prompt: str) -> str | None:
@@ -161,7 +170,7 @@ def main() -> None:
             first = ask("어떤 여행을 계획하고 계신가요?\n›")
             if first is None:
                 return
-            run(graph, {"messages": [HumanMessage(first)]}, config)
+            run(graph, {"messages": [HumanMessage(guarded(first))]}, config)
 
         while True:
             snapshot = graph.get_state(config)
@@ -176,7 +185,7 @@ def main() -> None:
             if answer is None:
                 console.print(f"\n대화를 저장했어요. 이어서 하려면: {resume_hint(thread_id)}")
                 return
-            run(graph, Command(resume=answer), config)
+            run(graph, Command(resume=guarded(answer)), config)
     except KeyboardInterrupt:
         console.print(f"\n중단했어요. 이어서 하려면: {resume_hint(thread_id)}")
     except Exception as exc:  # noqa: BLE001 - show a friendly message, state is checkpointed
