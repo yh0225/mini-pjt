@@ -54,7 +54,8 @@ START → intake ──(필수 정보 부족)→ [HITL①] ↺   ──(미지�
 - **Critic**: `rules.check_itinerary()`(권위) + `llm_review()`(미등록 장소·중복 방문·모순, 실패해도 무시). 위반이 있고 `retry_count < 2`면 위반 날짜를 `revise_days`로(사유에 `traveller_request` 원문 포함), 아니면 남은 위반을 `itinerary.warnings`로 덮어쓰고 `itinerary_checked=True`
   - 수정 요청 확인: **코드**(`activities_to_judge`)가 요청 날짜 + 시간대(`REQUEST_WINDOWS`: 오전·아침 <12, 점심 11–14, 오후 12–18, 저녁·밤 ≥18, 없으면 하루 전체)의 활동만 고르고(이동·식사 제외), LLM은 날짜별 `request_checks`(`satisfied`)만 답한다. `satisfied=False`만 `rule="request"` 위반
 - **final_approval** (HITL③): `interrupt({"type": "approve_itinerary", "itinerary"})` → `parse_final_reply()` → 승인(`traveller_request` 비움) / 고칠 날짜(`revise_days`·`traveller_request(_days)` 저장, `retry_count` 0) / "전체 다시"는 모든 날짜
-- **save**: `output.save_itinerary()` → `output/<thread_id>/itinerary.{json,md}` (사용한 장소의 출처 + CC BY-SA 문구)
+- **save**: `output.save_itinerary()` → `output/<thread_id>/itinerary.{json,md,pdf}` (사용한 장소의 출처 + CC BY-SA 문구)
+  - PDF: `to_html()`이 `Itinerary`에서 직접 HTML(A4 가로)을 만들고, 설치된 Edge/Chrome/Chromium을 headless로 실행해 인쇄한다 (새 의존성 없음). 브라우저는 `PDF_BROWSER` → `config.PDF_BROWSER_DEFAULTS` 순으로 찾는다. 브라우저가 없거나 실패·시간 초과(60초)면 경고 로그만 남기고 JSON·Markdown은 그대로 저장. 테스트는 `pdf=False` 또는 `write_pdf`/`find_browser` monkeypatch
 
 ### Researcher 도구
 | 도구 | 동작 |
@@ -137,6 +138,7 @@ AWS_ACCESS_KEY_ID= / AWS_SECRET_ACCESS_KEY= / AWS_DEFAULT_REGION=
 BEDROCK_PROFILE_PREFIX=  # 선택: 1st-party ID에 붙일 접두어 (기본 us)
 AGENT_MODEL=             # 1st-party ID(claude-sonnet-5-5) 또는 Bedrock ID 그대로
 LIGHT_MODEL=
+PDF_BROWSER=             # 선택: PDF 인쇄용 브라우저 경로 (비우면 자동 탐색)
 ```
 
 ## 폴더 구조
@@ -150,7 +152,7 @@ src/travel_agent/
 ├── config.py                # 경로·모델·환경 변수
 ├── llm.py                   # Chat 모델 생성 (Anthropic / Bedrock), LLMOutput
 ├── safety.py                # 가드레일: 입력 개인정보 가리기·안내, 부적절 선호·장소 차단 (LLM 없음)
-├── ui.py / output.py        # rich 표·요약 문구 / JSON·Markdown 저장
+├── ui.py / output.py        # rich 표·요약 문구 / JSON·Markdown·PDF 저장
 ├── evaluation.py            # 평가 실행·채점 (evaluation/run_eval.py가 호출)
 ├── agents/                  # intake, approval, researcher, supervisor, planner, critic, final_approval
 ├── tools/                   # places.py (search_places), travel.py (estimate_travel_time)

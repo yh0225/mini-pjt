@@ -31,7 +31,7 @@ LangChain · LangGraph · RAG · ReAct · HITL · Multi-agent를 모두 실제�
 | 인터페이스 | CLI 터미널 챗봇 |
 | 여행지 범위 | 국내 + 해외 (19개 도시: 초기 18개 + 삿포로) |
 | 사용자 개입 지점 | ① 부족 정보 되묻기 ② 후보 장소 승인 ③ 최종 일정 승인/수정 |
-| 결과물 | 터미널 일정표 + `itinerary.json` + `itinerary.md` (대화마다 `output/<대화 id>/`에 저장) |
+| 결과물 | 터미널 일정표 + `itinerary.json` + `itinerary.md` + `itinerary.pdf` (대화마다 `output/<대화 id>/`에 저장. PDF는 브라우저가 없거나 실패하면 생략) |
 | 언어 | 사용자에게 보이는 모든 내용은 한국어 (영어 자료도 한국어로 요약) |
 | 이어서 하기 | CLI를 종료해도 같은 대화를 이어서 진행 가능 |
 
@@ -52,7 +52,7 @@ LangChain · LangGraph · RAG · ReAct · HITL · Multi-agent를 모두 실제�
 사용자: 2일차 오후는 실내로 바꿔줘
 에이전트: (2일차만 재생성 → 재검증) 수정본 출력
 사용자: 좋아
-에이전트: itinerary.json / itinerary.md 저장 완료
+에이전트: itinerary.json / itinerary.md / itinerary.pdf 저장 완료
 ```
 
 ## 7. 동작 정책
@@ -125,7 +125,7 @@ LangChain · LangGraph · RAG · ReAct · HITL · Multi-agent를 모두 실제�
 |---|---|
 | 사전 수집 자료 | 위키보이지 (CC BY-SA). 영어판이 주 자료이고, 한국어판은 일부 도시의 짧은 소개만 있음 |
 | 지원 도시 (19곳) | 국내: 서울·제주·부산·강릉·경주·여수·전주 / 해외: 오사카·도쿄·후쿠오카·삿포로·오키나와·다낭·나트랑·방콕·발리·괌·타이베이·싱가포르 (삿포로는 오타루·노보리베쓰 포함) |
-| 출처 표기 | 일정의 각 활동에 출처 링크, `itinerary.md` 끝에 출처 목록과 CC BY-SA 문구 |
+| 출처 표기 | 일정의 각 활동에 출처 링크, `itinerary.md`·`itinerary.pdf` 끝에 출처 목록과 CC BY-SA 문구 |
 | 수집 매너 | `robots.txt` 준수, 과도한 요청 금지, 출처 URL 보존 |
 
 ## 10. 기능 요구사항
@@ -185,7 +185,7 @@ LangChain · LangGraph · RAG · ReAct · HITL · Multi-agent를 모두 실제�
 - [x] 규칙 위반을 잡아 재작업하고, 2회 초과 시 경고와 함께 넘긴다
 - [x] 최종 일정 수정 요청을 해당 날짜만 부분 반영한다 (③)
 - [x] CLI를 종료했다가 같은 대화를 이어서 진행할 수 있다
-- [x] `itinerary.json`, `itinerary.md`가 출처 목록과 함께 저장된다
+- [x] `itinerary.json`, `itinerary.md`, `itinerary.pdf`가 출처 목록과 함께 저장된다
 
 ### 품질 목표
 - 검색 품질: 한국어 질문↔정답 장소 20쌍 기준 Hit@5
